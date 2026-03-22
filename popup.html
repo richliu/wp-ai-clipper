@@ -206,6 +206,37 @@
     }
 
     .divider { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+
+    /* Toggle row (checkbox + label inline) */
+    .toggle-row {
+      display: flex; align-items: center; gap: 8px;
+      cursor: pointer; font-size: 13px; color: var(--text);
+      font-weight: normal; text-transform: none; letter-spacing: 0;
+    }
+    .toggle-row input[type="checkbox"] { cursor: pointer; accent-color: var(--accent); flex-shrink: 0; }
+
+    /* Export / Import buttons side by side */
+    .btn-row { display: flex; gap: 8px; }
+    .btn-row .btn { margin-top: 0; flex: 1; }
+    .import-paste {
+      display: none;
+      margin-top: 8px;
+    }
+    .import-paste.visible { display: block; }
+    .import-paste textarea {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--accent);
+      border-radius: var(--radius);
+      color: var(--text);
+      padding: 8px 10px;
+      font-size: 11px;
+      font-family: monospace;
+      outline: none;
+      resize: vertical;
+      min-height: 80px;
+    }
+    .import-paste .btn-row { margin-top: 6px; }
   </style>
 </head>
 <body>
@@ -236,7 +267,51 @@
       <a href="https://poorman.org/wp-admin/profile.php" target="_blank">直接前往 →</a>
     </div>
   </div>
+  <hr class="divider" />
+
+  <div class="field">
+    <label class="toggle-row">
+      <input type="checkbox" id="includeSourceUrl" checked />
+      將來源 URL 附加至文章
+    </label>
+    <div class="hint">啟用時在文章末尾加入來源連結區塊（獨立的 block）</div>
+  </div>
+
+  <div class="field">
+    <label class="toggle-row">
+      <input type="checkbox" id="stripUrlParams" checked />
+      移除 URL ? 後的參數
+    </label>
+    <div class="hint">儲存至 WordPress 前清除追蹤參數（如 utm_source、fbclid 等）</div>
+  </div>
+
+  <div class="field" id="whitelistField" style="padding-left:22px">
+    <label>白名單參數（保留，逗號分隔）</label>
+    <input type="text" id="urlParamWhitelist" placeholder="id, p, article" autocomplete="off" />
+    <div class="hint">填入不想移除的參數名稱，例如：id, p</div>
+  </div>
+
+  <hr class="divider" />
+
   <button class="btn btn-primary" id="saveSettings">儲存設定</button>
+
+  <hr class="divider" />
+
+  <div class="field">
+    <label>設定備份</label>
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="exportBtn">↑ 匯出 JSON</button>
+      <button class="btn btn-ghost" id="importToggleBtn">↓ 匯入 JSON</button>
+    </div>
+    <div class="import-paste" id="importPaste">
+      <textarea id="importJson" placeholder="將 JSON 內容貼上後按確認匯入"></textarea>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="importConfirmBtn" style="flex:1">確認匯入</button>
+        <button class="btn btn-ghost" id="importCancelBtn" style="flex:1;margin-top:0">取消</button>
+      </div>
+    </div>
+  </div>
+
   <div class="status" id="settingsStatus"></div>
 </div>
 

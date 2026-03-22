@@ -9,8 +9,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+function cleanUrlParams(url, stripUrlParams, whitelist) {
+  if (!stripUrlParams) return url;
+  try {
+    const u = new URL(url);
+    if (!u.search) return url;
+    const keep = whitelist.split(',').map(s => s.trim()).filter(Boolean);
+    if (keep.length === 0) {
+      u.search = '';
+    } else {
+      const kept = new URLSearchParams();
+      keep.forEach(key => {
+        if (u.searchParams.has(key)) kept.set(key, u.searchParams.get(key));
+      });
+      u.search = kept.toString() ? `?${kept.toString()}` : '';
+    }
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 async function handleSendToWordPress(payload) {
-  const { wpUrl, username, appPassword, articleData } = payload;
+  const { wpUrl, username, appPassword, includeSourceUrl, stripUrlParams, urlParamWhitelist, articleData } = payload;
+
+  // Clean article URL before use
+  articleData.url = cleanUrlParams(articleData.url, stripUrlParams !== false, urlParamWhitelist || '');
   const base = wpUrl.replace(/\/$/, '');
   const auth = btoa(`${username}:${appPassword}`);
   const headers = {
@@ -30,17 +54,20 @@ async function handleSendToWordPress(payload) {
     }
   }
 
-  // 2. Build post content with source attribution
-  const sourceBlock = `
-<hr />
-<p><strong>原始來源：</strong> <a href="${articleData.url}" target="_blank" rel="noopener noreferrer">${articleData.siteName || articleData.url}</a></p>
-`.trim();
-
+  // 2. Build post content
   const imageBlock = articleData.featuredImageUrl
     ? `<figure><img src="${articleData.featuredImageUrl}" alt="${articleData.title}" style="max-width:100%;height:auto;" /></figure>\n\n`
     : '';
 
-  const fullContent = imageBlock + articleData.content + '\n\n' + sourceBlock;
+  let fullContent = imageBlock + articleData.content;
+
+  // Optionally append Reference URL as a separate block
+  if (includeSourceUrl !== false) {
+    const refBlock =
+      `\n\n<!-- wp:separator -->\n<hr class="wp-block-separator has-alpha-channel-opacity"/>\n<!-- /wp:separator -->` +
+      `\n\n<!-- wp:paragraph -->\n<p><strong>Reference URL</strong> : <a href="${articleData.url}" target="_blank" rel="noopener noreferrer">${articleData.url}</a></p>\n<!-- /wp:paragraph -->`;
+    fullContent += refBlock;
+  }
 
   // 3. Create the draft post
   const postBody = {

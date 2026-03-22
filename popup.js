@@ -7,11 +7,21 @@ const settingsToggle = document.getElementById('settingsToggle');
 const settingsView   = document.getElementById('settingsView');
 const clipView       = document.getElementById('clipView');
 
-const wpUrlInput  = document.getElementById('wpUrl');
-const wpUserInput = document.getElementById('wpUser');
-const wpPassInput = document.getElementById('wpPass');
-const saveBtn     = document.getElementById('saveSettings');
-const settingsSt  = document.getElementById('settingsStatus');
+const wpUrlInput        = document.getElementById('wpUrl');
+const wpUserInput       = document.getElementById('wpUser');
+const wpPassInput       = document.getElementById('wpPass');
+const includeSourceUrlChk = document.getElementById('includeSourceUrl');
+const stripUrlParamsChk   = document.getElementById('stripUrlParams');
+const whitelistField      = document.getElementById('whitelistField');
+const urlParamWhitelist   = document.getElementById('urlParamWhitelist');
+const saveBtn             = document.getElementById('saveSettings');
+const exportBtn         = document.getElementById('exportBtn');
+const importToggleBtn   = document.getElementById('importToggleBtn');
+const importPaste       = document.getElementById('importPaste');
+const importJson        = document.getElementById('importJson');
+const importConfirmBtn  = document.getElementById('importConfirmBtn');
+const importCancelBtn   = document.getElementById('importCancelBtn');
+const settingsSt        = document.getElementById('settingsStatus');
 
 const showPreviewChk     = document.getElementById('showPreview');
 const previewToggleWrap  = document.getElementById('previewToggleWrap');
@@ -36,6 +46,12 @@ async function init() {
     wpUserInput.value = cfg.wpUser || '';
     // Don't pre-fill password for security
   }
+  // includeSourceUrl defaults to true if not yet set
+  includeSourceUrlChk.checked = cfg.includeSourceUrl !== false;
+  // stripUrlParams defaults to true if not yet set
+  stripUrlParamsChk.checked   = cfg.stripUrlParams !== false;
+  urlParamWhitelist.value     = cfg.urlParamWhitelist || '';
+  whitelistField.style.display = stripUrlParamsChk.checked ? '' : 'none';
 
   const hasConfig = cfg.wpUrl && cfg.wpUser && cfg.wpPass;
   if (!hasConfig) {
@@ -75,6 +91,11 @@ async function init() {
     console.error('Content script error:', e);
   }
 }
+
+// --- Strip params toggle: show/hide whitelist ---
+stripUrlParamsChk.addEventListener('change', () => {
+  whitelistField.style.display = stripUrlParamsChk.checked ? '' : 'none';
+});
 
 // --- Settings toggle ---
 settingsToggle.addEventListener('click', () => {
@@ -154,7 +175,14 @@ saveBtn.addEventListener('click', async () => {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const me = await res.json();
 
-    await saveConfig({ wpUrl: url, wpUser: user, wpPass: pass });
+    await saveConfig({
+      wpUrl:             url,
+      wpUser:            user,
+      wpPass:            pass,
+      includeSourceUrl:  includeSourceUrlChk.checked,
+      stripUrlParams:    stripUrlParamsChk.checked,
+      urlParamWhitelist: urlParamWhitelist.value.trim()
+    });
     showStatus(settingsSt, 'success', `✓ 已連線為 ${me.name}`);
     noConfigWarn.style.display = 'none';
     if (extractedData) clipBtn.disabled = false;
@@ -188,10 +216,13 @@ clipBtn.addEventListener('click', async () => {
     const result = await chrome.runtime.sendMessage({
       action: 'sendToWordPress',
       payload: {
-        wpUrl:       cfg.wpUrl,
-        username:    cfg.wpUser,
-        appPassword: cfg.wpPass,
-        articleData: extractedData
+        wpUrl:             cfg.wpUrl,
+        username:          cfg.wpUser,
+        appPassword:       cfg.wpPass,
+        includeSourceUrl:  cfg.includeSourceUrl !== false,
+        stripUrlParams:    cfg.stripUrlParams !== false,
+        urlParamWhitelist: cfg.urlParamWhitelist || '',
+        articleData:       extractedData
       }
     });
 
@@ -213,7 +244,7 @@ clipBtn.addEventListener('click', async () => {
 // --- Helpers ---
 function loadConfig() {
   return new Promise(resolve => {
-    chrome.storage.local.get(['wpUrl', 'wpUser', 'wpPass'], resolve);
+    chrome.storage.local.get(['wpUrl', 'wpUser', 'wpPass', 'includeSourceUrl', 'stripUrlParams', 'urlParamWhitelist'], resolve);
   });
 }
 
@@ -222,6 +253,75 @@ function saveConfig(data) {
     chrome.storage.local.set(data, resolve);
   });
 }
+
+// --- Export settings as JSON ---
+exportBtn.addEventListener('click', async () => {
+  const cfg = await loadConfig();
+  const exportData = {
+    wpUrl:             cfg.wpUrl || '',
+    wpUser:            cfg.wpUser || '',
+    wpPass:            cfg.wpPass || '',
+    includeSourceUrl:  cfg.includeSourceUrl !== false,
+    stripUrlParams:    cfg.stripUrlParams !== false,
+    urlParamWhitelist: cfg.urlParamWhitelist || ''
+  };
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = 'wp-clipper-settings.json';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// --- Import settings (paste JSON) ---
+importToggleBtn.addEventListener('click', () => {
+  importPaste.classList.toggle('visible');
+  importJson.value = '';
+  if (importPaste.classList.contains('visible')) importJson.focus();
+});
+
+importCancelBtn.addEventListener('click', () => {
+  importPaste.classList.remove('visible');
+  importJson.value = '';
+});
+
+importConfirmBtn.addEventListener('click', async () => {
+  const text = importJson.value.trim();
+  if (!text) return;
+  try {
+    const data = JSON.parse(text);
+    if (!data.wpUrl || !data.wpUser) throw new Error('缺少必要欄位（wpUrl, wpUser）');
+    const cleaned = {
+      wpUrl:             (data.wpUrl || '').trim().replace(/\/$/, ''),
+      wpUser:            (data.wpUser || '').trim(),
+      wpPass:            (data.wpPass || '').trim(),
+      includeSourceUrl:  data.includeSourceUrl !== false,
+      stripUrlParams:    data.stripUrlParams !== false,
+      urlParamWhitelist: (data.urlParamWhitelist || '').trim()
+    };
+    await saveConfig(cleaned);
+
+    // Update UI fields
+    wpUrlInput.value              = cleaned.wpUrl;
+    wpUserInput.value             = cleaned.wpUser;
+    wpPassInput.value             = cleaned.wpPass;
+    includeSourceUrlChk.checked   = cleaned.includeSourceUrl;
+    stripUrlParamsChk.checked     = cleaned.stripUrlParams;
+    urlParamWhitelist.value       = cleaned.urlParamWhitelist;
+    whitelistField.style.display  = cleaned.stripUrlParams ? '' : 'none';
+
+    // Update main view state
+    noConfigWarn.style.display = 'none';
+    if (extractedData) clipBtn.disabled = false;
+
+    importPaste.classList.remove('visible');
+    importJson.value = '';
+    showStatus(settingsSt, 'success', '✓ 設定已匯入並儲存');
+  } catch (err) {
+    showStatus(settingsSt, 'error', `匯入失敗：${err.message}`);
+  }
+});
 
 function showStatus(el, type, html) {
   el.className = `status ${type}`;
