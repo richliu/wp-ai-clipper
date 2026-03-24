@@ -237,6 +237,28 @@
       min-height: 80px;
     }
     .import-paste .btn-row { margin-top: 6px; }
+
+    /* Header button group */
+    .header-btns { display: flex; align-items: center; gap: 4px; }
+
+    /* Select field */
+    .field select {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      padding: 8px 10px;
+      font-size: 13px;
+      outline: none;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .field select:focus { border-color: var(--accent); }
+
+    /* Disabled ghost button */
+    .btn-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-ghost:disabled:hover { border-color: var(--border); color: var(--text); }
   </style>
 </head>
 <body>
@@ -246,7 +268,10 @@
     <div class="logo-icon">✂</div>
     WP Clipper
   </div>
-  <button class="settings-btn" id="settingsToggle" title="設定">⚙</button>
+  <div class="header-btns">
+    <button class="settings-btn" id="aiSettingsToggle" title="AI 設定">✦</button>
+    <button class="settings-btn" id="settingsToggle" title="WordPress 設定">⚙</button>
+  </div>
 </div>
 
 <!-- Settings View -->
@@ -315,6 +340,33 @@
   <div class="status" id="settingsStatus"></div>
 </div>
 
+<!-- AI Settings View -->
+<div class="view" id="aiSettingsView">
+  <div class="field">
+    <label>AI 供應商</label>
+    <select id="aiProvider">
+      <option value="deepseek">DeepSeek</option>
+      <option value="openai">OpenAI / ChatGPT</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>API Key</label>
+    <input type="password" id="aiApiKey" placeholder="sk-..." autocomplete="off" />
+  </div>
+  <div class="field">
+    <label>Model</label>
+    <input type="text" id="aiModel" placeholder="deepseek-chat" autocomplete="off" />
+    <div class="hint">DeepSeek 預設：deepseek-chat　　OpenAI 預設：gpt-4o</div>
+  </div>
+  <div class="field">
+    <label>Maximum Tokens</label>
+    <input type="number" id="aiMaxTokens" placeholder="128000" min="1000" max="200000" />
+    <div class="hint">AI 回應 token 上限，預設 128000</div>
+  </div>
+  <button class="btn btn-primary" id="saveAiSettings">儲存 AI 設定</button>
+  <div class="status" id="aiSettingsStatus"></div>
+</div>
+
 <!-- Clip View -->
 <div class="view active" id="clipView">
   <div id="noConfigWarn" class="warn" style="display:none">
@@ -352,6 +404,9 @@
   </button>
   <button class="btn btn-ghost" id="copyTextBtn" disabled>
     ⎘ 複製純文字
+  </button>
+  <button class="btn btn-ghost" id="aiCleanBtn" disabled>
+    ✦ AI 清理內容
   </button>
 
   <div class="status" id="clipStatus"></div>

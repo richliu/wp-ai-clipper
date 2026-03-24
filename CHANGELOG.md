@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.5] - 2026-03-24
+### Added
+- AI settings panel (✦ icon in header): configure DeepSeek or OpenAI/ChatGPT provider, API key, model, and max tokens
+- "✦ AI 清理內容" button in clip view: sends extracted HTML to the AI and strips off-topic content while keeping the main article intact
+- AI settings included in export/import JSON
+- AI clean button auto-enabled after import if API key is present
+
+### Changed
+- Header now has two icon buttons: ✦ (AI settings) and ⚙ (WordPress settings)
+- View toggle refactored to support 3 views (clip / WP settings / AI settings)
+
+---
+
 ## [1.0.4] - 2026-03-22
 ### Added
 - Export settings as JSON (download)
