@@ -91,6 +91,16 @@ function extractContent() {
     result.content = buildCleanHTML(contentEl);
   }
 
+  // --- Selection ---
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0 && sel.toString().trim().length > 10) {
+    const range = sel.getRangeAt(0);
+    const container = document.createElement('div');
+    container.appendChild(range.cloneContents());
+    result.selectedHtml = buildCleanHTML(container);
+    result.hasSelection  = true;
+  }
+
   // --- Excerpt from meta description ---
   result.excerpt =
     document.querySelector('meta[name="description"]')?.content ||
@@ -146,7 +156,7 @@ function buildCleanHTML(el) {
 }
 
 // Listen for messages from popup
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.action === 'extractContent') {
     try {
       const data = extractContent();

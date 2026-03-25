@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.6] - 2026-03-25
+### Added
+- Select text on page before opening popup → "僅匯入選取部分" toggle appears automatically
+- All actions (clip to WP, copy HTML, copy text, AI clean) respect the selection toggle
+- AI clean writes result back to the correct slot (selection or full content)
+
+---
+
 ## [1.0.5] - 2026-03-24
 ### Added
 - AI settings panel (✦ icon in header): configure DeepSeek or OpenAI/ChatGPT provider, API key, model, and max tokens

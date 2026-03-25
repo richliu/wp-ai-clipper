@@ -34,6 +34,8 @@ const saveAiBtn        = document.getElementById('saveAiSettings');
 const aiSettingsSt     = document.getElementById('aiSettingsStatus');
 
 // --- DOM refs (clip) ---
+const useSelectionWrap  = document.getElementById('useSelectionWrap');
+const useSelectionChk   = document.getElementById('useSelection');
 const showPreviewChk    = document.getElementById('showPreview');
 const previewToggleWrap = document.getElementById('previewToggleWrap');
 const copyBtn           = document.getElementById('copyBtn');
@@ -89,6 +91,10 @@ async function init() {
       postTitle.value   = extractedData.title   || '';
       postExcerpt.value = extractedData.excerpt || '';
 
+      if (extractedData.hasSelection) {
+        useSelectionWrap.style.display = 'flex';
+      }
+
       if (extractedData.featuredImageUrl) {
         previewImg.src = extractedData.featuredImageUrl;
         previewImg.classList.add('visible');
@@ -143,7 +149,7 @@ copyBtn.addEventListener('click', async () => {
   const imgHtml = extractedData.featuredImageUrl
     ? `<figure><img src="${extractedData.featuredImageUrl}" alt="${title}" style="max-width:100%;height:auto;" /></figure>\n`
     : '';
-  const html = `<h2>${title}</h2>\n${imgHtml}${extractedData.content}`;
+  const html = `<h2>${title}</h2>\n${imgHtml}${effectiveContent()}`;
   try {
     await navigator.clipboard.write([
       new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }) })
@@ -161,7 +167,7 @@ copyTextBtn.addEventListener('click', async () => {
   if (!extractedData) return;
   const title = postTitle.value.trim() || extractedData.title;
   const tmp = document.createElement('div');
-  tmp.innerHTML = extractedData.content;
+  tmp.innerHTML = effectiveContent();
   const body = tmp.innerText.trim().replace(/[ \t]*\n[ \t]*\n([ \t]*\n)+/g, '\n\n');
   const plainText = `${title}\n\n${body}`;
   try {
@@ -207,7 +213,7 @@ aiCleanBtn.addEventListener('click', async () => {
   const prompt =
     '我要擷取這篇文章，但是會同時抓到很多不相干的內容，請將本文以外的不相關內容移除，' +
     '本文原封不動不修改。只回傳清理後的 HTML 內容，不要加任何解釋或 markdown 標記。\n\n' +
-    '以下是待清理的 HTML 內容：\n\n' + extractedData.content;
+    '以下是待清理的 HTML 內容：\n\n' + effectiveContent();
 
   try {
     const res = await fetch(endpoint, {
@@ -234,7 +240,11 @@ aiCleanBtn.addEventListener('click', async () => {
     cleaned = cleaned.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
     if (!cleaned) throw new Error('AI 回傳內容為空');
 
-    extractedData.content = cleaned;
+    if (useSelectionChk.checked && extractedData.selectedHtml) {
+      extractedData.selectedHtml = cleaned;
+    } else {
+      extractedData.content = cleaned;
+    }
     showStatus(clipStatus, 'success', '✓ AI 清理完成，內容已更新');
     aiCleanBtn.innerHTML = '✓ 已清理';
     setTimeout(() => {
@@ -311,8 +321,11 @@ clipBtn.addEventListener('click', async () => {
     return;
   }
 
-  extractedData.title   = postTitle.value.trim() || extractedData.title;
-  extractedData.excerpt = postExcerpt.value.trim();
+  const sendData = Object.assign({}, extractedData, {
+    title:   postTitle.value.trim() || extractedData.title,
+    excerpt: postExcerpt.value.trim(),
+    content: effectiveContent()
+  });
 
   clipBtn.disabled = true;
   clipBtn.innerHTML = '<span class="spinner"></span>匯入中…';
@@ -328,7 +341,7 @@ clipBtn.addEventListener('click', async () => {
         includeSourceUrl:  cfg.includeSourceUrl !== false,
         stripUrlParams:    cfg.stripUrlParams !== false,
         urlParamWhitelist: cfg.urlParamWhitelist || '',
-        articleData:       extractedData
+        articleData:       sendData
       }
     });
 
@@ -454,6 +467,13 @@ function loadAiConfig() {
 
 function saveAiConfig(data) {
   return new Promise(resolve => { chrome.storage.local.set(data, resolve); });
+}
+
+function effectiveContent() {
+  if (useSelectionChk.checked && extractedData.selectedHtml) {
+    return extractedData.selectedHtml;
+  }
+  return extractedData.content;
 }
 
 function showStatus(el, type, html) {
