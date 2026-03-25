@@ -360,10 +360,13 @@
   </div>
   <div class="field">
     <label>Maximum Tokens</label>
-    <input type="number" id="aiMaxTokens" placeholder="128000" min="1000" max="200000" />
-    <div class="hint">AI 回應 token 上限，預設 128000</div>
+    <input type="number" id="aiMaxTokens" placeholder="8192" min="1000" max="32768" />
+    <div class="hint">輸出 token 上限（非 context window）。DeepSeek Chat 最大 8192，gpt-4o 最大 16384</div>
   </div>
-  <button class="btn btn-primary" id="saveAiSettings">儲存 AI 設定</button>
+  <div class="btn-row">
+    <button class="btn btn-primary" id="saveAiSettings" style="margin-top:0">儲存 AI 設定</button>
+    <button class="btn btn-ghost"   id="testAiBtn"      style="margin-top:0">測試連線</button>
+  </div>
   <div class="status" id="aiSettingsStatus"></div>
 </div>
 
@@ -413,6 +416,7 @@
   <button class="btn btn-ghost" id="aiCleanBtn" disabled>
     ✦ AI 清理內容
   </button>
+  <div class="status" id="aiCleanStatus"></div>
 
   <div class="status" id="clipStatus"></div>
 </div>

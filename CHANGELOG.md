@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.7] - 2026-03-25
+### Added
+- AI 設定頁新增「測試連線」按鈕（讀取表單目前值，不需先儲存）
+- AI 清理按鈕下方加獨立 `aiCleanStatus` 狀態列，成功/失敗即時顯示於按鈕正下方
+- AI 處理中同時鎖定 clip、複製 HTML、複製純文字三個按鈕，防止送出未清理內容
+- AI 清理成功後 clip 按鈕顯示 `[AI]` 標記；上傳成功後自動清除
+
+### Fixed
+- AI 清理 `max_tokens` 預設值從 128000 改為 8192（DeepSeek Chat 輸出上限），修正 API 立即報錯問題
+- API Key 未儲存時的錯誤提示改顯示在 `aiCleanStatus`（原本顯示在畫面底部看不到的位置）
+
+---
+
 ## [1.0.6] - 2026-03-25
 ### Added
 - Select text on page before opening popup → "僅匯入選取部分" toggle appears automatically

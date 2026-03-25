@@ -1,6 +1,7 @@
 // popup.js
 
 let extractedData = null;
+let aiCleaned     = false;
 
 // --- DOM refs (WP settings) ---
 const settingsToggle      = document.getElementById('settingsToggle');
@@ -31,6 +32,7 @@ const aiApiKeyInput    = document.getElementById('aiApiKey');
 const aiModelInput     = document.getElementById('aiModel');
 const aiMaxTokensInput = document.getElementById('aiMaxTokens');
 const saveAiBtn        = document.getElementById('saveAiSettings');
+const testAiBtn        = document.getElementById('testAiBtn');
 const aiSettingsSt     = document.getElementById('aiSettingsStatus');
 
 // --- DOM refs (clip) ---
@@ -41,6 +43,7 @@ const previewToggleWrap = document.getElementById('previewToggleWrap');
 const copyBtn           = document.getElementById('copyBtn');
 const copyTextBtn       = document.getElementById('copyTextBtn');
 const aiCleanBtn        = document.getElementById('aiCleanBtn');
+const aiCleanStatus     = document.getElementById('aiCleanStatus');
 const noConfigWarn      = document.getElementById('noConfigWarn');
 const pageTitle         = document.getElementById('pageTitle');
 const pageUrl           = document.getElementById('pageUrl');
@@ -71,7 +74,7 @@ async function init() {
   aiProviderSel.value    = aiCfg.aiProvider || 'deepseek';
   aiApiKeyInput.value    = aiCfg.aiApiKey   || '';
   aiModelInput.value     = aiCfg.aiModel    || DEFAULT_MODELS[aiProviderSel.value];
-  aiMaxTokensInput.value = aiCfg.aiMaxTokens || 128000;
+  aiMaxTokensInput.value = aiCfg.aiMaxTokens || 8192;
 
   const hasConfig = cfg.wpUrl && cfg.wpUser && cfg.wpPass;
   if (!hasConfig) {
@@ -180,6 +183,28 @@ copyTextBtn.addEventListener('click', async () => {
   }
 });
 
+// --- Shared AI API call helper ---
+async function callAiApi({ provider, apiKey, model, maxTokens, messages }) {
+  const endpoint = provider === 'openai'
+    ? 'https://api.openai.com/v1/chat/completions'
+    : 'https://api.deepseek.com/v1/chat/completions';
+
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({ model, max_tokens: maxTokens, messages })
+  });
+
+  if (!res.ok) {
+    const errJson = await res.json().catch(() => ({}));
+    throw new Error(errJson.error?.message || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 // --- AI provider change: update default model ---
 aiProviderSel.addEventListener('change', () => {
   const def = DEFAULT_MODELS[aiProviderSel.value];
@@ -194,21 +219,21 @@ aiCleanBtn.addEventListener('click', async () => {
   if (!extractedData) return;
   const aiCfg = await loadAiConfig();
   if (!aiCfg.aiApiKey) {
-    showStatus(clipStatus, 'error', '請先在 AI 設定（✦）中填入 API Key');
+    showStatus(aiCleanStatus, 'error', '請先在 AI 設定（✦）中填入並儲存 API Key');
     return;
   }
 
   const provider  = aiCfg.aiProvider || 'deepseek';
   const apiKey    = aiCfg.aiApiKey;
   const model     = aiCfg.aiModel || DEFAULT_MODELS[provider];
-  const maxTokens = parseInt(aiCfg.aiMaxTokens) || 128000;
-  const endpoint  = provider === 'openai'
-    ? 'https://api.openai.com/v1/chat/completions'
-    : 'https://api.deepseek.com/v1/chat/completions';
+  const maxTokens = parseInt(aiCfg.aiMaxTokens) || 8192;
 
-  aiCleanBtn.disabled = true;
+  aiCleanBtn.disabled  = true;
   aiCleanBtn.innerHTML = '<span class="spinner"></span>AI 處理中…';
-  clearStatus(clipStatus);
+  clipBtn.disabled     = true;
+  copyBtn.disabled     = true;
+  copyTextBtn.disabled = true;
+  clearStatus(aiCleanStatus);
 
   const prompt =
     '我要擷取這篇文章，但是會同時抓到很多不相干的內容，請將本文以外的不相關內容移除，' +
@@ -216,27 +241,12 @@ aiCleanBtn.addEventListener('click', async () => {
     '以下是待清理的 HTML 內容：\n\n' + effectiveContent();
 
   try {
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: maxTokens,
-        messages: [{ role: 'user', content: prompt }]
-      })
+    const json = await callAiApi({
+      provider, apiKey, model, maxTokens,
+      messages: [{ role: 'user', content: prompt }]
     });
 
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.error?.message || `HTTP ${res.status}`);
-    }
-
-    const json = await res.json();
     let cleaned = json.choices?.[0]?.message?.content?.trim() || '';
-    // Strip markdown code fences if AI wrapped the response
     cleaned = cleaned.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
     if (!cleaned) throw new Error('AI 回傳內容為空');
 
@@ -245,16 +255,24 @@ aiCleanBtn.addEventListener('click', async () => {
     } else {
       extractedData.content = cleaned;
     }
-    showStatus(clipStatus, 'success', '✓ AI 清理完成，內容已更新');
+    aiCleaned = true;
+    showStatus(aiCleanStatus, 'success', '✓ AI 清理完成');
     aiCleanBtn.innerHTML = '✓ 已清理';
+    clipBtn.innerHTML    = '✂ 匯入為草稿 [AI]';
+    clipBtn.disabled     = false;
+    copyBtn.disabled     = false;
+    copyTextBtn.disabled = false;
     setTimeout(() => {
       aiCleanBtn.innerHTML = '✦ AI 清理內容';
-      aiCleanBtn.disabled = false;
+      aiCleanBtn.disabled  = false;
     }, 3000);
   } catch (e) {
-    showStatus(clipStatus, 'error', `AI 失敗：${e.message}`);
-    aiCleanBtn.disabled = false;
+    showStatus(aiCleanStatus, 'error', `AI 失敗：${e.message}`);
+    aiCleanBtn.disabled  = false;
     aiCleanBtn.innerHTML = '✦ AI 清理內容';
+    clipBtn.disabled     = false;
+    copyBtn.disabled     = false;
+    copyTextBtn.disabled = false;
   }
 });
 
@@ -311,6 +329,36 @@ saveAiBtn.addEventListener('click', async () => {
   if (extractedData && apiKey) aiCleanBtn.disabled = false;
 });
 
+// --- Test AI connection ---
+testAiBtn.addEventListener('click', async () => {
+  const provider = aiProviderSel.value;
+  const apiKey   = aiApiKeyInput.value.trim();
+  const model    = aiModelInput.value.trim() || DEFAULT_MODELS[provider];
+
+  if (!apiKey) {
+    showStatus(aiSettingsSt, 'error', '請先填入 API Key');
+    return;
+  }
+
+  testAiBtn.disabled = true;
+  testAiBtn.innerHTML = '<span class="spinner"></span>測試中…';
+  clearStatus(aiSettingsSt);
+
+  try {
+    const json = await callAiApi({
+      provider, apiKey, model, maxTokens: 16,
+      messages: [{ role: 'user', content: 'hi' }]
+    });
+    const reply = json.choices?.[0]?.message?.content?.trim() || '(ok)';
+    showStatus(aiSettingsSt, 'success', `✓ 連線成功（${model}）：${reply}`);
+  } catch (e) {
+    showStatus(aiSettingsSt, 'error', `✗ 連線失敗：${e.message}`);
+  } finally {
+    testAiBtn.disabled = false;
+    testAiBtn.innerHTML = '測試連線';
+  }
+});
+
 // --- Clip button ---
 clipBtn.addEventListener('click', async () => {
   if (!extractedData) return;
@@ -349,14 +397,15 @@ clipBtn.addEventListener('click', async () => {
       showStatus(clipStatus, 'success',
         `✓ 已建立草稿！<br><a href="${result.result.editUrl}" target="_blank">在 WordPress 編輯 →</a>`
       );
+      aiCleaned = false;
       clipBtn.innerHTML = '✓ 已匯入';
     } else {
       throw new Error(result.error);
     }
   } catch (e) {
     showStatus(clipStatus, 'error', `匯入失敗：${e.message}`);
-    clipBtn.disabled = false;
-    clipBtn.innerHTML = '✂ 匯入為草稿';
+    clipBtn.disabled  = false;
+    clipBtn.innerHTML = aiCleaned ? '✂ 匯入為草稿 [AI]' : '✂ 匯入為草稿';
   }
 });
 
