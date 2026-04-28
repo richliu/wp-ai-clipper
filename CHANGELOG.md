@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.10] - 2026-04-29
+### Fixed
+- 中時新聞網提取器未觸發：`isChinatimes()` regex `\d{17}` 改為 `\d{8,}`（文章 ID 為 14 碼，非 17 碼）
+- 贊助區塊（`#donate-form-container`）現在正確移除，新增 `[id*="donate"]`、`[class*="donation"]` 選擇器
+- 圖片重複問題：以 `seenSrcs` Set 去重，og:image 已設為 featuredImage 時不再重複加入 images 陣列
+
+---
+
 ## [1.0.9] - 2026-04-29
 ### Added
 - 中時新聞網（chinatimes.com）專屬提取器 `extractChinatimes()`

@@ -535,7 +535,9 @@ function extractFbComment(commentEl) {
 // ===== CHINATIMES SUPPORT ===================================
 
 function isChinatimes() {
-  return /chinatimes\.com/.test(window.location.hostname);
+  // Only match single article pages: /realtimenews/20260428004260-260410
+  return /chinatimes\.com/.test(window.location.hostname) &&
+    /\/\d{8,}-\d+/.test(window.location.pathname);
 }
 
 function extractChinatimes() {
@@ -580,6 +582,8 @@ function extractChinatimes() {
 
   // Remove chinatimes-specific noise
   const noiseSelectors = [
+    // Donation / sponsor section
+    '#donate-form-container', '[id*="donate"]', '.donation', '[class*="donation"]',
     // Ads
     '[class*="dfp"]', '[class*="ad-"]', '[id*="dfp"]', '[id*="gpt"]',
     '.advertisement', '.ad-wrapper', '.ad-area',
@@ -605,13 +609,17 @@ function extractChinatimes() {
   ];
   clone.querySelectorAll(noiseSelectors.join(', ')).forEach(el => el.remove());
 
-  // Collect images before building HTML
+  // Collect images before building HTML (deduplicate by URL)
+  const seenSrcs = new Set();
+  if (result.featuredImageUrl) seenSrcs.add(result.featuredImageUrl);
   clone.querySelectorAll('img').forEach(img => {
     const src = img.src || img.dataset.src || img.dataset.lazySrc || img.dataset.original || '';
-    if (src && src.startsWith('http') && !src.includes('icon') && !src.includes('logo') && !src.includes('1x1')) {
-      if (!result.featuredImageUrl) result.featuredImageUrl = src;
-      result.images.push({ src, alt: img.alt || '' });
-    }
+    if (!src || !src.startsWith('http')) return;
+    if (src.includes('icon') || src.includes('logo') || src.includes('1x1')) return;
+    if (seenSrcs.has(src)) return;
+    seenSrcs.add(src);
+    if (!result.featuredImageUrl) result.featuredImageUrl = src;
+    result.images.push({ src, alt: img.alt || '' });
   });
 
   result.content = buildCleanHTML(clone);
