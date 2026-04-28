@@ -532,6 +532,70 @@ function extractFbComment(commentEl) {
   return { author, time, html: commentHtml };
 }
 
+// ===== UDN SUPPORT ==========================================
+
+function isUdn() {
+  return /udn\.com/.test(window.location.hostname) &&
+    /\/news\/story\/\d+\/\d+/.test(window.location.pathname);
+}
+
+function extractUdn() {
+  const url = window.location.href;
+  const result = {
+    url, siteName: '聯合新聞網',
+    title: '', content: '', excerpt: '', featuredImageUrl: '', images: []
+  };
+
+  result.title =
+    document.querySelector('meta[property="og:title"]')?.content ||
+    document.querySelector('h1.article-content__title, h1')?.innerText ||
+    document.title || '';
+  result.title = result.title.trim();
+
+  result.featuredImageUrl =
+    document.querySelector('meta[property="og:image"]')?.content || '';
+
+  result.excerpt =
+    document.querySelector('meta[name="description"]')?.content ||
+    document.querySelector('meta[property="og:description"]')?.content || '';
+
+  const articleBody = document.querySelector('.article-content__editor');
+  if (!articleBody) {
+    result.content = '';
+    return result;
+  }
+
+  const clone = articleBody.cloneNode(true);
+
+  // Remove udn-specific noise
+  clone.querySelectorAll([
+    // Inline ads blocks
+    '.inline-ads', '[class*="udn-ads"]',
+    // Taboola / Google ad slots
+    '[id*="taboola"]', '[id*="ads-"]', '[id*="underlay"]', '[id*="innity"]',
+    // Inline-styled promo/related-link blocks (e.g. 全球熱話題)
+    'div[style*="background-color"]',
+    // Scripts / styles injected into article
+    'script', 'style', 'noscript',
+  ].join(', ')).forEach(el => el.remove());
+
+  // Deduplicate images
+  const seenSrcs = new Set();
+  if (result.featuredImageUrl) seenSrcs.add(result.featuredImageUrl);
+  clone.querySelectorAll('img').forEach(img => {
+    const src = img.src || img.dataset.src || img.dataset.lazySrc || img.dataset.original || '';
+    if (!src || !src.startsWith('http')) return;
+    if (src.includes('icon') || src.includes('logo') || src.includes('1x1')) return;
+    if (seenSrcs.has(src)) return;
+    seenSrcs.add(src);
+    if (!result.featuredImageUrl) result.featuredImageUrl = src;
+    result.images.push({ src, alt: img.alt || '' });
+  });
+
+  result.content = buildCleanHTML(clone);
+  return result;
+}
+
 // ===== CHINATIMES SUPPORT ===================================
 
 function isChinatimes() {
@@ -633,6 +697,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     try {
       const data = isFacebookPost() ? extractFbPost()
                 : isChinatimes()    ? extractChinatimes()
+                : isUdn()           ? extractUdn()
                 : extractContent();
       sendResponse({ success: true, data });
     } catch (e) {

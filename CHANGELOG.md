@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.11] - 2026-04-29
+### Added
+- 聯合新聞網（udn.com）專屬提取器 `extractUdn()`
+  - 精準鎖定 `.article-content__editor` 為內容容器
+  - 移除 inline-ads、udn-ads、Taboola、innity 廣告區塊
+  - 移除文章內 inline-styled 推薦連結區塊（如「全球熱話題」）：`div[style*="background-color"]`
+  - 圖片去重（同 chinatimes）
+
+---
+
 ## [1.0.10] - 2026-04-29
 ### Fixed
 - 中時新聞網提取器未觸發：`isChinatimes()` regex `\d{17}` 改為 `\d{8,}`（文章 ID 為 14 碼，非 17 碼）
