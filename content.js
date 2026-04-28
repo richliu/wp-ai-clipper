@@ -532,12 +532,100 @@ function extractFbComment(commentEl) {
   return { author, time, html: commentHtml };
 }
 
+// ===== CHINATIMES SUPPORT ===================================
+
+function isChinatimes() {
+  return /chinatimes\.com/.test(window.location.hostname);
+}
+
+function extractChinatimes() {
+  const url = window.location.href;
+  const result = {
+    url, siteName: '中時新聞網',
+    title: '', content: '', excerpt: '', featuredImageUrl: '', images: []
+  };
+
+  // --- Title ---
+  result.title =
+    document.querySelector('meta[property="og:title"]')?.content ||
+    document.querySelector('h1.article-title, h1')?.innerText ||
+    document.title || '';
+  result.title = result.title.trim();
+
+  // --- Featured image ---
+  result.featuredImageUrl =
+    document.querySelector('meta[property="og:image"]')?.content || '';
+
+  // --- Excerpt ---
+  result.excerpt =
+    document.querySelector('meta[name="description"]')?.content ||
+    document.querySelector('meta[property="og:description"]')?.content || '';
+
+  // --- Find article body ---
+  // chinatimes puts the article text in .article-body
+  // <article> is too broad (includes sidebar, tags, related news)
+  const articleBody =
+    document.querySelector('.article-body') ||
+    document.querySelector('.article-content') ||
+    document.querySelector('article .news-content') ||
+    document.querySelector('article');
+
+  if (!articleBody) {
+    result.content = '';
+    return result;
+  }
+
+  // Clone to avoid mutating the page
+  const clone = articleBody.cloneNode(true);
+
+  // Remove chinatimes-specific noise
+  const noiseSelectors = [
+    // Ads
+    '[class*="dfp"]', '[class*="ad-"]', '[id*="dfp"]', '[id*="gpt"]',
+    '.advertisement', '.ad-wrapper', '.ad-area',
+    // Related / recommended
+    '[class*="related"]', '[class*="recommend"]', '[class*="rel-news"]',
+    '.more-news', '.next-article', '.prev-next',
+    // Tags, keywords
+    '[class*="tag"]', '[class*="keyword"]',
+    // Author box (duplicate info at bottom)
+    '[class*="author-box"]', '[class*="author-info"]',
+    // Social share
+    '[class*="social"]', '[class*="share"]',
+    // Subscribe / paywall overlays
+    '[class*="subscribe"]', '[class*="paywall"]', '[class*="member"]',
+    // Navigation / breadcrumb
+    'nav', '.breadcrumb',
+    // Scripts / styles
+    'script', 'style', 'noscript',
+    // Newsletter / sidebar widgets injected into body
+    '[class*="newsletter"]', '[class*="widget"]',
+    // Video placeholder buttons
+    '[class*="video-placeholder"]',
+  ];
+  clone.querySelectorAll(noiseSelectors.join(', ')).forEach(el => el.remove());
+
+  // Collect images before building HTML
+  clone.querySelectorAll('img').forEach(img => {
+    const src = img.src || img.dataset.src || img.dataset.lazySrc || img.dataset.original || '';
+    if (src && src.startsWith('http') && !src.includes('icon') && !src.includes('logo') && !src.includes('1x1')) {
+      if (!result.featuredImageUrl) result.featuredImageUrl = src;
+      result.images.push({ src, alt: img.alt || '' });
+    }
+  });
+
+  result.content = buildCleanHTML(clone);
+  return result;
+}
+
 // ===== MESSAGE LISTENER =====================================
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.action === 'extractContent') {
     try {
-      const data = isFacebookPost() ? extractFbPost() : extractContent();
+      const data = isFacebookPost() ? extractFbPost()
+                : isChinatimes()    ? extractChinatimes()
+                : extractContent();
       sendResponse({ success: true, data });
     } catch (e) {
       sendResponse({ success: false, error: e.message });

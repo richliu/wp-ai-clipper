@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.9] - 2026-04-29
+### Added
+- 中時新聞網（chinatimes.com）專屬提取器 `extractChinatimes()`
+  - 精準鎖定 `.article-body` 為內容容器，避免 `<article>` 過寬抓到廣告、推薦文章、標籤區
+  - 自動移除 dfp 廣告、related/recommend 推薦區塊、tag 標籤、author-box、社群分享、paywall 元素
+  - 保留正文圖片並正確設定 featuredImage
+
+---
+
 ## [1.0.8] - 2026-04-28
 ### Fixed
 - Facebook permalink 頁面內容抓取完全錯誤的問題
