@@ -37,7 +37,7 @@
 1. 點右上角 **✦** 進入 AI 設定
 2. 選擇供應商：**DeepSeek** 或 **OpenAI / ChatGPT**
 3. 填入 API Key
-4. Model 名稱（預設：DeepSeek → `deepseek-chat`，OpenAI → `gpt-4o`）
+4. Model 名稱（預設：DeepSeek → `deepseek-v4-pro`，OpenAI → `gpt-4o`）
 5. 點「測試連線」確認 API 正常
 6. 點「儲存 AI 設定」
 
@@ -69,7 +69,7 @@
 ### AI 清理
 - 送出選取或全文 HTML 給 AI，移除非本文內容（廣告、選單、相關文章等）
 - 本文內容原封不動保留
-- 支援 DeepSeek（`deepseek-chat`）及 OpenAI（`gpt-4o`）
+- 支援 DeepSeek（`deepseek-v4-pro` / `deepseek-v4-flash`）及 OpenAI（`gpt-4o`）
 - AI 處理中自動鎖定上傳/複製按鈕，確保上傳的是清理後的版本
 - 清理完成後 clip 按鈕顯示 `[AI]` 標記
 

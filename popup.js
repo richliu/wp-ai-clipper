@@ -36,6 +36,9 @@ const testAiBtn        = document.getElementById('testAiBtn');
 const aiSettingsSt     = document.getElementById('aiSettingsStatus');
 
 // --- DOM refs (clip) ---
+const fbModeSection  = document.getElementById('fbModeSection');
+const fbExpandBtn    = document.getElementById('fbExpandBtn');
+const fbExpandStatus = document.getElementById('fbExpandStatus');
 const useSelectionWrap  = document.getElementById('useSelectionWrap');
 const useSelectionChk   = document.getElementById('useSelection');
 const showPreviewChk    = document.getElementById('showPreview');
@@ -53,7 +56,8 @@ const postExcerpt       = document.getElementById('postExcerpt');
 const clipBtn           = document.getElementById('clipBtn');
 const clipStatus        = document.getElementById('clipStatus');
 
-const DEFAULT_MODELS = { deepseek: 'deepseek-chat', openai: 'gpt-4o' };
+const DEFAULT_MODELS = { deepseek: 'deepseek-v4-pro', openai: 'gpt-4o' };
+const FB_POST_RE = /^https?:\/\/(www\.|m\.)?facebook\.com\/([\w.%+-]+\/posts\/|permalink\.php|groups\/[^?#/]+\/posts\/|share\/p\/)/;
 
 // --- Init ---
 async function init() {
@@ -64,6 +68,11 @@ async function init() {
   if (cfg.wpUrl) {
     wpUrlInput.value  = cfg.wpUrl;
     wpUserInput.value = cfg.wpUser || '';
+  }
+  const wpAdminLink = document.getElementById('wpAdminLink');
+  if (wpAdminLink) {
+    const base = cfg.wpUrl || 'https://example.com';
+    wpAdminLink.href = `${base}/wp-admin/profile.php`;
   }
   includeSourceUrlChk.checked  = cfg.includeSourceUrl !== false;
   stripUrlParamsChk.checked    = cfg.stripUrlParams !== false;
@@ -86,6 +95,10 @@ async function init() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     pageUrl.textContent = tab.url || '';
+
+    if (FB_POST_RE.test(tab.url || '')) {
+      fbModeSection.style.display = 'block';
+    }
 
     const resp = await chrome.tabs.sendMessage(tab.id, { action: 'extractContent' });
     if (resp && resp.success) {
@@ -205,6 +218,38 @@ async function callAiApi({ provider, apiKey, model, maxTokens, messages }) {
   return res.json();
 }
 
+// --- Facebook: expand comments ---
+fbExpandBtn.addEventListener('click', async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+  fbExpandBtn.disabled = true;
+  fbExpandBtn.innerHTML = '<span class="spinner"></span>展開留言中…';
+  showStatus(fbExpandStatus, 'success', '正在點擊展開按鈕，請稍候…');
+
+  try {
+    const resp = await chrome.tabs.sendMessage(tab.id, { action: 'expandFbComments' });
+
+    if (!resp?.success) throw new Error(resp?.error || '展開失敗');
+
+    showStatus(fbExpandStatus, 'success', `✓ 已展開，重新擷取留言…`);
+
+    // Re-extract after expansion
+    const extracted = await chrome.tabs.sendMessage(tab.id, { action: 'extractContent' });
+    if (extracted?.success) {
+      extractedData = extracted.data;
+      postTitle.value   = extractedData.title   || postTitle.value;
+      postExcerpt.value = extractedData.excerpt  || postExcerpt.value;
+      const count = extractedData.comments?.length ?? 0;
+      showStatus(fbExpandStatus, 'success', `✓ 擷取完成，共 ${count} 則留言`);
+    }
+  } catch (e) {
+    showStatus(fbExpandStatus, 'error', `失敗：${e.message}`);
+  } finally {
+    fbExpandBtn.disabled = false;
+    fbExpandBtn.innerHTML = '↕ 展開所有留言';
+  }
+});
+
 // --- AI provider change: update default model ---
 aiProviderSel.addEventListener('change', () => {
   const def = DEFAULT_MODELS[aiProviderSel.value];
@@ -287,30 +332,35 @@ saveBtn.addEventListener('click', async () => {
     return;
   }
 
-  saveBtn.textContent = '測試連線中…';
+  saveBtn.textContent = '儲存中…';
   saveBtn.disabled = true;
 
+  // 先儲存，再測試連線（避免連線失敗時設定遺失）
+  await saveConfig({
+    wpUrl:             url,
+    wpUser:            user,
+    wpPass:            pass,
+    includeSourceUrl:  includeSourceUrlChk.checked,
+    stripUrlParams:    stripUrlParamsChk.checked,
+    urlParamWhitelist: urlParamWhitelist.value.trim()
+  });
+  const wpAdminLink = document.getElementById('wpAdminLink');
+  if (wpAdminLink) wpAdminLink.href = `${url}/wp-admin/profile.php`;
+
+  saveBtn.textContent = '測試連線中…';
   try {
     const auth = btoa(`${user}:${pass}`);
     const res = await fetch(`${url}/wp-json/wp/v2/users/me`, {
-      headers: { 'Authorization': `Basic ${auth}` }
+      headers: { 'Authorization': `Basic ${auth}` },
+      credentials: 'omit'
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const me = await res.json();
-
-    await saveConfig({
-      wpUrl:             url,
-      wpUser:            user,
-      wpPass:            pass,
-      includeSourceUrl:  includeSourceUrlChk.checked,
-      stripUrlParams:    stripUrlParamsChk.checked,
-      urlParamWhitelist: urlParamWhitelist.value.trim()
-    });
-    showStatus(settingsSt, 'success', `✓ 已連線為 ${me.name}`);
+    showStatus(settingsSt, 'success', `✓ 已儲存，連線為 ${me.name}`);
     noConfigWarn.style.display = 'none';
     if (extractedData) clipBtn.disabled = false;
   } catch (e) {
-    showStatus(settingsSt, 'error', `連線失敗：${e.message}。請確認網址、帳號、Application Password 是否正確。`);
+    showStatus(settingsSt, 'warn', `設定已儲存，但連線測試失敗：${e.message}`);
   } finally {
     saveBtn.textContent = '儲存設定';
     saveBtn.disabled = false;

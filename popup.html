@@ -182,6 +182,12 @@
       border: 1px solid rgba(224,92,92,0.3);
       color: var(--error);
     }
+    .status.warn {
+      display: block;
+      background: rgba(200,150,30,0.12);
+      border: 1px solid rgba(200,150,30,0.3);
+      color: #c8960a;
+    }
     .status a { color: inherit; font-weight: 600; }
 
     /* Loading spinner */
@@ -259,6 +265,18 @@
     /* Disabled ghost button */
     .btn-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
     .btn-ghost:disabled:hover { border-color: var(--border); color: var(--text); }
+
+    /* Facebook mode */
+    .fb-badge {
+      background: rgba(24,119,242,0.1);
+      border: 1px solid rgba(24,119,242,0.3);
+      border-radius: var(--radius);
+      color: #5b9bd5;
+      font-size: 12px; font-weight: 500;
+      padding: 7px 10px;
+      margin-bottom: 10px;
+      display: flex; align-items: center; gap: 6px;
+    }
   </style>
 </head>
 <body>
@@ -289,7 +307,7 @@
     <input type="password" id="wpPass" placeholder="xxxx xxxx xxxx xxxx xxxx xxxx" autocomplete="off" />
     <div class="hint">
       從 WordPress 後台 → 使用者 → 你的個人檔案 → Application Passwords 產生。<br>
-      <a href="https://poorman.org/wp-admin/profile.php" target="_blank">直接前往 →</a>
+      <a id="wpAdminLink" href="#" target="_blank">直接前往 →</a>
     </div>
   </div>
   <hr class="divider" />
@@ -355,8 +373,8 @@
   </div>
   <div class="field">
     <label>Model</label>
-    <input type="text" id="aiModel" placeholder="deepseek-chat" autocomplete="off" />
-    <div class="hint">DeepSeek 預設：deepseek-chat　　OpenAI 預設：gpt-4o</div>
+    <input type="text" id="aiModel" placeholder="deepseek-v4-pro" autocomplete="off" />
+    <div class="hint">DeepSeek 預設：deepseek-v4-pro（快速版：deepseek-v4-flash）　OpenAI 預設：gpt-4o</div>
   </div>
   <div class="field">
     <label>Maximum Tokens</label>
@@ -374,6 +392,16 @@
 <div class="view active" id="clipView">
   <div id="noConfigWarn" class="warn" style="display:none">
     ⚠ 尚未設定 WordPress 連線，請先點右上角 ⚙ 設定。
+  </div>
+
+  <!-- Facebook mode -->
+  <div id="fbModeSection" style="display:none">
+    <div class="fb-badge">📘 Facebook 貼文模式</div>
+    <button class="btn btn-ghost" id="fbExpandBtn">
+      ↕ 展開所有留言
+    </button>
+    <div class="status" id="fbExpandStatus"></div>
+    <hr class="divider" style="margin-top:10px">
   </div>
 
   <div class="page-info">

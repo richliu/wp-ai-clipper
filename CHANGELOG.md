@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.8] - 2026-04-28
+### Fixed
+- Facebook permalink 頁面內容抓取完全錯誤的問題
+  - 現代 Facebook 將貼文渲染在 `[role="dialog"]` overlay 內，而非 `[role="main"]`
+  - 舊版只搜尋 `[role="main"]`，導致抓到廣告/推薦貼文的文字
+  - 新版優先偵測含有 `[data-ad-preview="message"]` 的 dialog，以其為根容器
+  - Dialog layout 中所有 `[role="article"]` 均為留言，新增 `notInCommentArticle()` 過濾器確保作者、時間、圖片不會從留言區誤抓
+  - P4 fallback 原本搜尋整個 `main`（bug），修正為只在 `postScope` 內搜尋並排除留言
+
+---
+
+
 ## [1.0.7] - 2026-03-25
 ### Added
 - AI 設定頁新增「測試連線」按鈕（讀取表單目前值，不需先儲存）
