@@ -1,5 +1,9 @@
 // popup.js
 
+// Show version from manifest
+const _ver = chrome.runtime.getManifest().version;
+document.getElementById('versionBadge').textContent = `v${_ver}`;
+
 let extractedData = null;
 let aiCleaned     = false;
 

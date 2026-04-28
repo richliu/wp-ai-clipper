@@ -87,6 +87,7 @@ async function handleSendToWordPress(payload) {
   const postRes = await fetch(`${base}/wp-json/wp/v2/posts`, {
     method: 'POST',
     headers,
+    credentials: 'omit',
     body: JSON.stringify(postBody)
   });
 
@@ -131,6 +132,7 @@ async function uploadImageFromUrl(base, headers, imageUrl, altText, articleUrl) 
       'Content-Type': contentType,
       'Content-Disposition': `attachment; filename="${filename}"`
     },
+    credentials: 'omit',
     body: blob
   });
 
