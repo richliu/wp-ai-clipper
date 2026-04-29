@@ -1,5 +1,9 @@
 // popup.js
 
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 // ── i18n ─────────────────────────────────────────────────────────────────────
 const TRANSLATIONS = {
   'zh-TW': {
@@ -62,11 +66,11 @@ const TRANSLATIONS = {
     msg_fill_all: '請填寫所有欄位',
     msg_saving: '儲存中…',
     msg_testing_conn: '測試連線中…',
-    msg_saved_conn: (name) => `✓ 已儲存，連線為 ${name}`,
+    msg_saved_conn: (name) => `✓ 已儲存，連線為 ${escHtml(name)}`,
     msg_saved_conn_fail: '設定已儲存，但連線測試失敗：',
     msg_no_api_key: '請先填入 API Key',
     msg_testing: '測試中…',
-    msg_conn_ok: (model, reply) => `✓ 連線成功（${model}）：${reply}`,
+    msg_conn_ok: (model, reply) => `✓ 連線成功（${escHtml(model)}）：${escHtml(reply)}`,
     msg_conn_fail: '✗ 連線失敗：',
     msg_clip_no_config: '請先完成設定',
     msg_importing: '匯入中…',
@@ -170,11 +174,11 @@ const TRANSLATIONS = {
     msg_fill_all: 'Please fill in all fields',
     msg_saving: 'Saving…',
     msg_testing_conn: 'Testing connection…',
-    msg_saved_conn: (name) => `✓ Saved, connected as ${name}`,
+    msg_saved_conn: (name) => `✓ Saved, connected as ${escHtml(name)}`,
     msg_saved_conn_fail: 'Settings saved but connection test failed: ',
     msg_no_api_key: 'Please enter an API Key first',
     msg_testing: 'Testing…',
-    msg_conn_ok: (model, reply) => `✓ Connection successful (${model}): ${reply}`,
+    msg_conn_ok: (model, reply) => `✓ Connection successful (${escHtml(model)}): ${escHtml(reply)}`,
     msg_conn_fail: '✗ Connection failed: ',
     msg_clip_no_config: 'Please complete settings first',
     msg_importing: 'Importing…',
@@ -235,12 +239,22 @@ function t(key, ...args) {
   return val !== undefined ? val : key;
 }
 
+// Sets a button to show a spinner + translated label without using innerHTML
+function setSpinnerBtn(btn, labelKey) {
+  btn.textContent = '';
+  const sp = document.createElement('span');
+  sp.className = 'spinner';
+  btn.appendChild(sp);
+  btn.appendChild(document.createTextNode(t(labelKey)));
+}
+
 function applyTranslations() {
   document.documentElement.lang = currentLang;
   document.querySelectorAll('[data-i18n]').forEach(el => {
     el.textContent = t(el.dataset.i18n);
   });
   document.querySelectorAll('[data-i18n-html]').forEach(el => {
+    // Safe: translations are hardcoded strings in TRANSLATIONS, never user input
     el.innerHTML = t(el.dataset.i18nHtml);
   });
   const btnMap = {
@@ -352,8 +366,9 @@ function updateModelOptions(provider) {
   const sel = document.getElementById('aiModelPreset');
   if (!sel) return;
   const models = MODEL_OPTIONS[provider] || [];
+  // Safe: MODEL_OPTIONS values are hardcoded constants, not user input
   sel.innerHTML = `<option value="">— ${t('label_model_select')} —</option>` +
-    models.map(m => `<option value="${m}">${m}</option>`).join('');
+    models.map(m => `<option value="${escHtml(m)}">${escHtml(m)}</option>`).join('');
   // Pre-select if current value matches a known model
   const cur = aiModelInput ? aiModelInput.value : '';
   sel.value = models.includes(cur) ? cur : '';
@@ -504,7 +519,7 @@ copyBtn.addEventListener('click', async () => {
     copyBtn.textContent = t('msg_copied');
     setTimeout(() => { copyBtn.textContent = orig; }, 2000);
   } catch (e) {
-    showStatus(clipStatus, 'error', `${t('msg_copy_fail')}${e.message}`);
+    showStatus(clipStatus, 'error', `${t('msg_copy_fail')}${escHtml(e.message)}`);
   }
 });
 
@@ -513,7 +528,7 @@ copyTextBtn.addEventListener('click', async () => {
   if (!extractedData) return;
   const title = postTitle.value.trim() || extractedData.title;
   const tmp = document.createElement('div');
-  tmp.innerHTML = effectiveContent();
+  tmp.innerHTML = effectiveContent(); // detached element, used only for .innerText extraction
   const body = tmp.innerText.trim().replace(/[ \t]*\n[ \t]*\n([ \t]*\n)+/g, '\n\n');
   const plainText = `${title}\n\n${body}`;
   try {
@@ -522,7 +537,7 @@ copyTextBtn.addEventListener('click', async () => {
     copyTextBtn.textContent = t('msg_copied');
     setTimeout(() => { copyTextBtn.textContent = orig; }, 2000);
   } catch (e) {
-    showStatus(clipStatus, 'error', `${t('msg_copy_fail')}${e.message}`);
+    showStatus(clipStatus, 'error', `${t('msg_copy_fail')}${escHtml(e.message)}`);
   }
 });
 
@@ -553,7 +568,7 @@ fbExpandBtn.addEventListener('click', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
   fbExpandBtn.disabled = true;
-  fbExpandBtn.innerHTML = `<span class="spinner"></span>${t('msg_fb_expanding')}`;
+  setSpinnerBtn(fbExpandBtn, 'msg_fb_expanding');
   showStatus(fbExpandStatus, 'success', t('msg_fb_expanding'));
 
   try {
@@ -573,7 +588,7 @@ fbExpandBtn.addEventListener('click', async () => {
       showStatus(fbExpandStatus, 'success', t('msg_fb_done', count));
     }
   } catch (e) {
-    showStatus(fbExpandStatus, 'error', `${t('msg_fb_fail')}${e.message}`);
+    showStatus(fbExpandStatus, 'error', `${t('msg_fb_fail')}${escHtml(e.message)}`);
   } finally {
     fbExpandBtn.disabled = false;
     fbExpandBtn.textContent = t('btn_fb_expand');
@@ -752,7 +767,7 @@ function plurkOpts() {
 plurkExpandBtn.addEventListener('click', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   plurkExpandBtn.disabled = true;
-  plurkExpandBtn.innerHTML = `<span class="spinner"></span>${t('msg_plurk_expanding')}`;
+  setSpinnerBtn(plurkExpandBtn, 'msg_plurk_expanding');
   showStatus(plurkExpandStatus, 'success', t('msg_plurk_expanding'));
 
   try {
@@ -771,7 +786,7 @@ plurkExpandBtn.addEventListener('click', async () => {
         t('msg_plurk_expanded', pd.loadedCount, pd.responseCount));
     }
   } catch (e) {
-    showStatus(plurkExpandStatus, 'error', e.message || '展開失敗');
+    showStatus(plurkExpandStatus, 'error', escHtml(e.message || '展開失敗'));
   } finally {
     plurkExpandBtn.disabled = false;
     plurkExpandBtn.textContent = t('btn_plurk_expand');
@@ -810,7 +825,7 @@ aiCleanBtn.addEventListener('click', async () => {
   const maxTokens = parseInt(aiCfg.aiMaxTokens) || 8192;
 
   aiCleanBtn.disabled  = true;
-  aiCleanBtn.innerHTML = `<span class="spinner"></span>${t('msg_ai_processing')}`;
+  setSpinnerBtn(aiCleanBtn, 'msg_ai_processing');
   clipBtn.disabled     = true;
   copyBtn.disabled     = true;
   copyTextBtn.disabled = true;
@@ -845,7 +860,7 @@ aiCleanBtn.addEventListener('click', async () => {
       aiCleanBtn.disabled    = false;
     }, 3000);
   } catch (e) {
-    showStatus(aiCleanStatus, 'error', `${t('msg_ai_fail')}${e.message}`);
+    showStatus(aiCleanStatus, 'error', `${t('msg_ai_fail')}${escHtml(e.message)}`);
     aiCleanBtn.disabled  = false;
     aiCleanBtn.textContent = t('btn_ai_clean');
     clipBtn.disabled     = false;
@@ -895,7 +910,7 @@ saveBtn.addEventListener('click', async () => {
     noConfigWarn.style.display = 'none';
     if (extractedData) clipBtn.disabled = false;
   } catch (e) {
-    showStatus(settingsSt, 'warn', `${t('msg_saved_conn_fail')}${e.message}`);
+    showStatus(settingsSt, 'warn', `${t('msg_saved_conn_fail')}${escHtml(e.message)}`);
   } finally {
     saveBtn.textContent = t('btn_save_settings');
     saveBtn.disabled = false;
@@ -927,7 +942,7 @@ testAiBtn.addEventListener('click', async () => {
   }
 
   testAiBtn.disabled = true;
-  testAiBtn.innerHTML = `<span class="spinner"></span>${t('msg_testing')}`;
+  setSpinnerBtn(testAiBtn, 'msg_testing');
   clearStatus(aiSettingsSt);
 
   try {
@@ -938,7 +953,7 @@ testAiBtn.addEventListener('click', async () => {
     const reply = json.choices?.[0]?.message?.content?.trim() || '(ok)';
     showStatus(aiSettingsSt, 'success', t('msg_conn_ok', model, reply));
   } catch (e) {
-    showStatus(aiSettingsSt, 'error', `${t('msg_conn_fail')}${e.message}`);
+    showStatus(aiSettingsSt, 'error', `${t('msg_conn_fail')}${escHtml(e.message)}`);
   } finally {
     testAiBtn.disabled = false;
     testAiBtn.textContent = t('btn_test_ai');
@@ -972,7 +987,7 @@ clipBtn.addEventListener('click', async () => {
   });
 
   clipBtn.disabled = true;
-  clipBtn.innerHTML = `<span class="spinner"></span>${t('msg_importing')}`;
+  setSpinnerBtn(clipBtn, 'msg_importing');
   clearStatus(clipStatus);
 
   try {
@@ -998,7 +1013,7 @@ clipBtn.addEventListener('click', async () => {
       throw new Error(result.error);
     }
   } catch (e) {
-    showStatus(clipStatus, 'error', `${t('msg_import_fail')}${e.message}`);
+    showStatus(clipStatus, 'error', `${t('msg_import_fail')}${escHtml(e.message)}`);
     clipBtn.disabled  = false;
     clipBtn.textContent = aiCleaned ? t('btn_clip_ai') : t('btn_clip');
   }
@@ -1105,7 +1120,7 @@ importConfirmBtn.addEventListener('click', async () => {
     importJson.value = '';
     showStatus(settingsSt, 'success', t('msg_settings_imported'));
   } catch (err) {
-    showStatus(settingsSt, 'error', `${t('msg_import_fail')}${err.message}`);
+    showStatus(settingsSt, 'error', `${t('msg_import_fail')}${escHtml(err.message)}`);
   }
 });
 
@@ -1138,6 +1153,7 @@ function effectiveContent() {
 }
 
 function showStatus(el, type, html) {
+  // innerHTML is intentional: some messages contain links (e.g. msg_imported)
   el.className = `status ${type}`;
   el.innerHTML = html;
 }

@@ -3,6 +3,16 @@
   "name": "WP Clipper",
   "version": "1.1.0",
   "description": "Clip news articles and web content to WordPress as drafts",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "wp-clipper@richliu.github.io",
+      "strict_min_version": "109.0",
+      "data_collection_permissions": {
+        "required": [],
+        "optional": []
+      }
+    }
+  },
   "permissions": [
     "activeTab",
     "storage",
