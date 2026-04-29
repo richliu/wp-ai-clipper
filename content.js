@@ -690,21 +690,236 @@ function extractChinatimes() {
   return result;
 }
 
+// ===== PLURK SUPPORT ========================================
+
+const PLURK_POST_RE = /^https?:\/\/(www\.)?plurk\.com\/(p|m\/p)\/([a-zA-Z0-9]+)/;
+
+function isPlurkPost() {
+  return PLURK_POST_RE.test(window.location.href);
+}
+
+function plurkEsc(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Content scripts run in an isolated world and cannot read window.plurk from
+// the page. Inject a tiny script into the main world and pass data back via
+// a document CustomEvent (document is shared between all worlds).
+function getPlurkPageVars() {
+  return new Promise(resolve => {
+    const eid = `__wpc_${Date.now()}`;
+    document.addEventListener(eid, function h(e) {
+      document.removeEventListener(eid, h);
+      resolve(e.detail || {});
+    }, { once: true });
+    const s = document.createElement('script');
+    s.textContent = `document.dispatchEvent(new CustomEvent(${JSON.stringify(eid)},{detail:{id:window.plurk&&window.plurk.id,count:window.plurk&&window.plurk.response_count}}))`;
+    (document.head || document.documentElement).appendChild(s);
+    s.remove();
+  });
+}
+
+function extractPlurkResponse(el) {
+  const rid = el.getAttribute('data-rid') || el.getAttribute('data-id') || '';
+  const author = el.querySelector('.name')?.innerText?.trim() || '';
+  const timeEl = el.querySelector('abbr');
+  const time = timeEl?.getAttribute('title') || timeEl?.innerText?.trim() || '';
+  const textHolder = el.querySelector('.content .text_holder');
+  const text = textHolder?.innerText?.trim() || '';
+
+  const imgs = [];
+  el.querySelectorAll('a.ex_link.pictureservices').forEach(a => {
+    const src = a.href || '';
+    if (src && src.startsWith('http')) {
+      imgs.push({ src, alt: a.querySelector('img')?.alt || '' });
+    }
+  });
+
+  const links = [];
+  if (textHolder) {
+    textHolder.querySelectorAll('a[href]').forEach(a => {
+      if (a.classList.contains('ex_link') && a.classList.contains('pictureservices')) return;
+      if (a.classList.contains('name_tag')) return;
+      const href = a.getAttribute('href') || '';
+      const linkText = a.innerText?.trim() || '';
+      if (href && linkText && !href.startsWith('javascript')) {
+        links.push({ href, text: linkText });
+      }
+    });
+  }
+
+  const hasEmo = Array.from(el.querySelectorAll('img')).some(img =>
+    img.src && img.src.includes('emos.plurk.com')
+  );
+  const hasUserImg = imgs.length > 0;
+  const hasLink = links.length > 0;
+  const isEmpty = !text && !hasUserImg && !hasLink;
+  const isPureEmo = !text.replace(/\s/g, '') && hasEmo && !hasUserImg && links.length === 0;
+
+  return { rid, author, time, text, hasUserImg, hasEmo, hasLink, isPureEmo, isEmpty, imgs, links };
+}
+
+// Fetch ALL responses via Plurk's AJAX endpoint (works while user is logged in)
+async function expandPlurkResponses() {
+  // Get total count from main world (window.plurk is inaccessible in content scripts)
+  const pageVars = await getPlurkPageVars();
+  const totalCount = pageVars.count || null;
+
+  // Show the load-older controls — Plurk hides them with class 'hide' by default
+  const holder = document.querySelector('.load-older-holder');
+  if (holder) holder.classList.remove('hide');
+
+  let lastCount = -1;
+  let stuckRounds = 0;
+  const MAX_STUCK = 6;
+
+  while (stuckRounds < MAX_STUCK) {
+    const current = document.querySelectorAll('.response[data-type="response"]').length;
+    if (totalCount && current >= totalCount) break;
+
+    if (current === lastCount) {
+      stuckRounds++;
+    } else {
+      stuckRounds = 0;
+    }
+    lastCount = current;
+
+    // Wait if Plurk is currently mid-load (loading spinner visible)
+    const loadingSpinner = holder && holder.querySelector('.loading:not(.hide)');
+    if (loadingSpinner) {
+      await new Promise(r => setTimeout(r, 1200));
+      continue;
+    }
+
+    const btn = document.querySelector('.load-older-holder .button.load-older');
+    if (btn) {
+      btn.click();
+    } else {
+      stuckRounds++;
+    }
+    await new Promise(r => setTimeout(r, 1800));
+  }
+
+  return document.querySelectorAll('.response[data-type="response"]').length;
+}
+
+async function extractPlurkPost() {
+  const url = window.location.href;
+  const match = url.match(PLURK_POST_RE);
+  const postId = match?.[3] || '';
+
+  const result = {
+    url, platform: 'plurk', siteName: 'Plurk',
+    title: '', content: '', excerpt: '', featuredImageUrl: '', images: [],
+    plurkData: null
+  };
+
+  const mainEl = document.querySelector('.plurk.bigplurk') ||
+    Array.from(document.querySelectorAll('.plurk')).find(el => !el.classList.contains('response'));
+
+  if (!mainEl) {
+    result.title = document.title;
+    return result;
+  }
+
+  const owner = mainEl.querySelector('.name')?.innerText?.trim() || '';
+  const timeEl = mainEl.querySelector('abbr');
+  const postTime = timeEl?.getAttribute('title') || timeEl?.innerText?.trim() || '';
+  const mainTextHolder = mainEl.querySelector('.content .text_holder');
+  const postText = mainTextHolder?.innerText?.trim() || '';
+
+  const postImgs = [];
+  mainEl.querySelectorAll('a.ex_link.pictureservices').forEach(a => {
+    const src = a.href || '';
+    if (src && src.startsWith('http')) {
+      postImgs.push({ src, alt: a.querySelector('img')?.alt || '' });
+    }
+  });
+
+  // Scrape DOM responses; get real total count from window.plurk via main-world injection
+  const responseEls = Array.from(document.querySelectorAll('.response[data-type="response"]'));
+  const responses = responseEls.map(extractPlurkResponse);
+  const loadedCount = responses.length;
+  const pageVars = await getPlurkPageVars();
+  const totalResponseCount = pageVars.count || loadedCount;
+
+  const ogImage = document.querySelector('meta[property="og:image"]')?.content || '';
+  result.featuredImageUrl = postImgs[0]?.src || ogImage;
+  result.images = [...postImgs, ...responses.flatMap(r => r.imgs)];
+
+  const year = postTime?.match(/\b(20\d{2})\b/)?.[1] || new Date().getFullYear();
+  result.title = `${year} ${owner} Plurk 串（${totalResponseCount} 則）`;
+  result.excerpt = postText.slice(0, 200) + (postText.length > 200 ? '…' : '');
+
+  result.plurkData = {
+    postId, owner, ownerAvatar: '',
+    postTime, postText, postImgs,
+    responseCount: totalResponseCount, loadedCount,
+    responses, hasMoreResponses: loadedCount < totalResponseCount
+  };
+
+  // Build default full-backup HTML
+  let html = `<p><strong>${plurkEsc(owner)}</strong>`;
+  if (postTime) html += ` · <small>${plurkEsc(postTime)}</small>`;
+  html += '</p>\n';
+  postText.split('\n').filter(l => l.trim()).forEach(line => {
+    html += `<p>${plurkEsc(line)}</p>\n`;
+  });
+  postImgs.forEach(({ src, alt }) => {
+    html += `<!-- wp:html -->\n<figure><img src="${plurkEsc(src)}" alt="${plurkEsc(alt)}" style="max-width:100%;height:auto;"/></figure>\n<!-- /wp:html -->\n`;
+  });
+
+  if (responses.length > 0) {
+    html += '\n<!-- wp:separator -->\n<hr class="wp-block-separator has-alpha-channel-opacity"/>\n<!-- /wp:separator -->\n';
+    html += `\n<!-- wp:heading {"level":3} -->\n<h3>回應（${loadedCount}${loadedCount < totalResponseCount ? ' / ' + totalResponseCount : ''}）</h3>\n<!-- /wp:heading -->\n`;
+    responses.forEach(({ author, time, text, imgs, links }) => {
+      html += '<!-- wp:quote -->\n<blockquote class="wp-block-quote">\n';
+      html += `<p><strong>${plurkEsc(author)}</strong>`;
+      if (time) html += ` · <small>${plurkEsc(time)}</small>`;
+      html += '</p>\n';
+      text.split('\n').filter(l => l.trim()).forEach(line => {
+        html += `<p>${plurkEsc(line)}</p>\n`;
+      });
+      links.forEach(({ href, text: lt }) => {
+        html += `<p><a href="${plurkEsc(href)}" target="_blank" rel="noopener noreferrer">${plurkEsc(lt)}</a></p>\n`;
+      });
+      html += '</blockquote>\n<!-- /wp:quote -->\n';
+      // Images must be outside blockquote — Gutenberg wp:quote only allows <p> children
+      imgs.forEach(({ src, alt }) => {
+        html += `<!-- wp:html -->\n<figure><img src="${plurkEsc(src)}" alt="${plurkEsc(alt)}" style="max-width:100%;height:auto;"/></figure>\n<!-- /wp:html -->\n`;
+      });
+    });
+  }
+
+  result.content = html;
+  return result;
+}
+
 // ===== MESSAGE LISTENER =====================================
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.action === 'extractContent') {
-    try {
-      const data = isFacebookPost() ? extractFbPost()
-                : isChinatimes()    ? extractChinatimes()
-                : isUdn()           ? extractUdn()
-                : extractContent();
-      sendResponse({ success: true, data });
-    } catch (e) {
-      sendResponse({ success: false, error: e.message });
+    if (isPlurkPost()) {
+      extractPlurkPost()
+        .then(data => sendResponse({ success: true, data }))
+        .catch(e   => sendResponse({ success: false, error: e.message }));
+    } else {
+      try {
+        const data = isFacebookPost() ? extractFbPost()
+                  : isChinatimes()    ? extractChinatimes()
+                  : isUdn()           ? extractUdn()
+                  : extractContent();
+        sendResponse({ success: true, data });
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
+      }
     }
   } else if (msg.action === 'expandFbComments') {
     expandFbComments()
+      .then(count => sendResponse({ success: true, count }))
+      .catch(err  => sendResponse({ success: false, error: err.message }));
+  } else if (msg.action === 'expandPlurkResponses') {
+    expandPlurkResponses()
       .then(count => sendResponse({ success: true, count }))
       .catch(err  => sendResponse({ success: false, error: err.message }));
   }

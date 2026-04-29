@@ -277,6 +277,21 @@
       margin-bottom: 10px;
       display: flex; align-items: center; gap: 6px;
     }
+
+    /* Plurk mode */
+    .plurk-badge {
+      background: rgba(255,102,0,0.08);
+      border: 1px solid rgba(255,102,0,0.3);
+      border-radius: var(--radius);
+      color: #e06020;
+      font-size: 12px; font-weight: 500;
+      padding: 7px 10px;
+      margin-bottom: 10px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .plurk-options { margin: 8px 0; display: flex; flex-direction: column; gap: 5px; }
+    .plurk-mode-btns { display: flex; gap: 6px; margin-top: 8px; }
+    .plurk-mode-btns .btn { flex: 1; padding: 7px 4px; font-size: 12px; margin-top: 0; }
   </style>
 </head>
 <body>
@@ -321,6 +336,14 @@
     </div>
   </div>
   <hr class="divider" />
+
+  <div class="field">
+    <label class="toggle-row">
+      <input type="checkbox" id="uploadInlineImages" checked />
+      <span data-i18n="label_upload_inline">上傳內文圖片到媒體庫</span>
+    </label>
+    <div class="hint" data-i18n="hint_upload_inline">將文章內所有圖片上傳至 WordPress 媒體庫並取代連結（超過 10 張時會提示確認）</div>
+  </div>
 
   <div class="field">
     <label class="toggle-row">
@@ -389,8 +412,13 @@
   </div>
   <div class="field">
     <label>Maximum Tokens</label>
-    <input type="number" id="aiMaxTokens" placeholder="8192" min="1000" max="32768" />
+    <input type="number" id="aiMaxTokens" placeholder="8192" min="1000" max="128000" />
     <div class="hint" data-i18n="hint_ai_tokens">輸出 token 上限（非 context window）。DeepSeek Chat 最大 8192，gpt-4o 最大 16384</div>
+  </div>
+  <div class="field">
+    <label data-i18n="label_ai_context">批次 Context 上限（tokens）</label>
+    <input type="number" id="aiContextTokens" placeholder="32000" min="4000" max="900000" />
+    <div class="hint" data-i18n="hint_ai_context">決定 AI 精選每批塞多少 tokens。deepseek-v4 可設 300000，gpt-4o 可設 128000，小模型建議 16000</div>
   </div>
   <div class="btn-row">
     <button class="btn btn-primary" id="saveAiSettings" style="margin-top:0">儲存 AI 設定</button>
@@ -403,6 +431,29 @@
 <div class="view active" id="clipView">
   <div id="noConfigWarn" class="warn" style="display:none">
     ⚠ 尚未設定 WordPress 連線，請先點右上角 ⚙ 設定。
+  </div>
+
+  <!-- Plurk mode -->
+  <div id="plurkModeSection" style="display:none">
+    <div class="plurk-badge" data-i18n="badge_plurk_mode">🐧 Plurk 串備份模式</div>
+    <div id="plurkInfo" class="hint" style="margin-bottom:8px"></div>
+    <button class="btn btn-ghost" id="plurkExpandBtn" data-i18n="btn_plurk_expand">↕ 展開全部回應</button>
+    <div class="status" id="plurkExpandStatus"></div>
+    <div class="plurk-options" style="margin-top:10px">
+      <label class="toggle-row">
+        <input type="checkbox" id="plurkSaveImages" checked />
+        <span data-i18n="label_plurk_images">備份影像</span>
+      </label>
+      <label class="toggle-row">
+        <input type="checkbox" id="plurkSaveLinks" checked />
+        <span data-i18n="label_plurk_links">備份連結</span>
+      </label>
+      <label class="toggle-row">
+        <input type="checkbox" id="plurkNoEmoji" checked />
+        <span data-i18n="label_plurk_no_emoji">排除純表情回應</span>
+      </label>
+    </div>
+    <hr class="divider" style="margin-top:10px">
   </div>
 
   <!-- Facebook mode -->

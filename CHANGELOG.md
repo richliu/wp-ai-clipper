@@ -1,5 +1,45 @@
 # Changelog
 
+## [1.1.0] - 2026-04-30
+### Added
+- 內文圖片上傳：匯入時自動將文章內所有 `<img>` 上傳至 WordPress 媒體庫並取代連結（設定面板可關閉，預設開啟）
+- 超過 10 張圖片時跳出確認對話框
+- Plurk 串備份模式：展開全部回應後一鍵匯入為 WordPress 草稿
+  - 正確使用 `.load-older-holder .button.load-older` 觸發 Plurk 懶載入（修復舊版 scroll / API 方案）
+  - 三個備份選項：備份影像、備份連結、排除純表情回應
+  - 使用 `window.plurk.response_count` 取得真實總則數（透過 main-world script 注入橋接）
+- AI 設定新增「批次 Context 上限（tokens）」欄位，用於推算 AI 精選的每批大小
+- 介面語言支援完整更新（繁體中文 / English）
+
+### Fixed
+- Plurk 回應圖片放入 `<blockquote>` 造成 Gutenberg block 結構損壞 → 改用 `<!-- wp:html -->` 置於 blockquote 之後
+- 外部圖片 URL 放入 `<!-- wp:image -->` 導致 WordPress「非預期內容」錯誤 → 改用 `<!-- wp:html -->`
+- `extractPlurkPost()` 改為 async，可正確取得 `window.plurk.response_count` 並更新總則數顯示
+- 匯入後再次點擊「匯入」按鈕不再送出前次 AI 精選內容（不再 mutate `extractedData.content`）
+
+### Security
+- `background.js` 修正兩處 HTML injection 風險：`articleData.title` 和 `articleData.url` 在插入 HTML 前未經 escape，現在統一透過 `escHtml()` 處理
+
+---
+
+## [1.0.14] - 2026-04-29
+### Added
+- Plurk 單噗頁面（`plurk.com/p/*`）專屬提取器 `extractPlurkPost()`
+  - 自動偵測主貼文（`.plurk.bigplurk`）與所有回應（`.response[data-type="response"]`）
+  - 回應物件含 `hasUserImg`、`hasEmo`、`hasLink`、`isPureEmo`、`isEmpty` 標記
+  - `window.plurk.response_count` 取得總回應數，支援數千噗的超長串
+- Popup 新增 Plurk 串備份模式面板（`#plurkModeSection`）：
+  - 顯示已載入 / 總回應數
+  - **展開全部回應** 按鈕（呼叫 `expandPlurkResponses`，滾動式懶載入）
+  - 三個篩選選項：備份影像、備份連結、排除純表情回應
+  - **全部備份**：依篩選選項建立 HTML，直接送 WordPress
+  - **AI 精選**：分批（每批 300 則）送 LLM，回傳要保留的索引，重建 HTML 後送 WP
+  - **AI 整理成文**：分批摘要後合併，請 LLM 整合為完整文章 HTML
+  - **自訂 AI**：展開 prompt 輸入框，附加全部回應文字後送 LLM
+- i18n 新增所有 Plurk 相關文字（繁體中文 + English）
+
+---
+
 ## [1.0.13] - 2026-04-29
 ### Added
 - AI 模型名稱下拉選單（`<datalist>`）：可從主流模型清單選取，也可自行輸入

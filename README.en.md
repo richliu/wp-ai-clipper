@@ -8,9 +8,8 @@ A handy tool for WordPress users who collect articles while browsing the web.
 
 ## Features
 
-* Written with AI assistance, unmodified
-* Settings are stored locally on your computer — no external connections required (except to your API and WP)
-* Fully Open Source
+- Settings are stored locally on your computer — no external connections required (except to your API and WP)
+- Fully Open Source
 
 ## Installation
 
@@ -55,6 +54,7 @@ A handy tool for WordPress users who collect articles while browsing the web.
 
 ## How to Use
 
+### Regular Articles
 1. Browse to any article or news page
 2. (Optional) Select the text you want to clip
 3. Click the ✂ icon to open the popup
@@ -62,6 +62,13 @@ A handy tool for WordPress users who collect articles while browsing the web.
 5. (Optional) Click **✦ AI Clean Content** to strip irrelevant content — wait until the button shows `[AI]`
 6. Click **✂ Import as Draft** to upload to WordPress
 7. Click the result link to jump directly to the WP editor
+
+### Plurk Thread Backup
+1. Open the Plurk post page you want to back up (`plurk.com/p/xxxxxx`)
+2. Click the ✂ icon — the popup automatically enters **Plurk Backup Mode**
+3. Click **Expand All Responses** to load all replies (may take a while for long threads)
+4. Choose filter options (backup images, backup links, exclude emoji-only responses)
+5. Click **Backup All** to import directly as a WordPress draft
 
 ---
 
@@ -71,6 +78,7 @@ A handy tool for WordPress users who collect articles while browsing the web.
 - ✅ Article title
 - ✅ Body content (ads and navigation stripped)
 - ✅ Featured image (og:image) uploaded to Media Library
+- ✅ All inline images automatically uploaded to Media Library and URLs replaced (can be disabled, on by default)
 - ✅ meta description used as excerpt
 - ✅ Original source URL appended to the post (can be disabled)
 - ✅ Selected text → import only the selection
@@ -91,6 +99,10 @@ A handy tool for WordPress users who collect articles while browsing the web.
 - Export all settings (including AI API Key) as a JSON backup
 - Paste JSON to restore settings with one click
 
+### Interface Language
+- Supports Traditional Chinese / English, follows system language by default
+- Can be switched manually in settings, takes effect immediately
+
 ### Site-specific Extractors
 
 The following sites use custom extractors that keep only the main article body:
@@ -98,10 +110,10 @@ The following sites use custom extractors that keep only the main article body:
 - `www.chinatimes.com` — China Times
 - `udn.com` — United Daily News
 - `facebook.com` — Facebook posts (comments are preserved by default; open individual posts by middle-clicking the timestamp)
+- `plurk.com/p/*` — Plurk post pages (backup mode)
 
 ---
 
 ## Roadmap
 
 - [ ] Threads support
-- [ ] Plurk support
