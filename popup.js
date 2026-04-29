@@ -239,6 +239,12 @@ function t(key, ...args) {
   return val !== undefined ? val : key;
 }
 
+// Safely sets element HTML content using DOMParser to avoid direct innerHTML assignment
+function safeSetHtml(el, html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  el.replaceChildren(...Array.from(doc.body.childNodes));
+}
+
 // Sets a button to show a spinner + translated label without using innerHTML
 function setSpinnerBtn(btn, labelKey) {
   btn.textContent = '';
@@ -254,8 +260,7 @@ function applyTranslations() {
     el.textContent = t(el.dataset.i18n);
   });
   document.querySelectorAll('[data-i18n-html]').forEach(el => {
-    // Safe: translations are hardcoded strings in TRANSLATIONS, never user input
-    el.innerHTML = t(el.dataset.i18nHtml);
+    safeSetHtml(el, t(el.dataset.i18nHtml));
   });
   const btnMap = {
     saveSettings: 'btn_save_settings', exportBtn: 'btn_export',
@@ -366,9 +371,17 @@ function updateModelOptions(provider) {
   const sel = document.getElementById('aiModelPreset');
   if (!sel) return;
   const models = MODEL_OPTIONS[provider] || [];
-  // Safe: MODEL_OPTIONS values are hardcoded constants, not user input
-  sel.innerHTML = `<option value="">— ${t('label_model_select')} —</option>` +
-    models.map(m => `<option value="${escHtml(m)}">${escHtml(m)}</option>`).join('');
+  sel.replaceChildren();
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = `— ${t('label_model_select')} —`;
+  sel.appendChild(placeholder);
+  models.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m;
+    opt.textContent = m;
+    sel.appendChild(opt);
+  });
   // Pre-select if current value matches a known model
   const cur = aiModelInput ? aiModelInput.value : '';
   sel.value = models.includes(cur) ? cur : '';
@@ -527,9 +540,8 @@ copyBtn.addEventListener('click', async () => {
 copyTextBtn.addEventListener('click', async () => {
   if (!extractedData) return;
   const title = postTitle.value.trim() || extractedData.title;
-  const tmp = document.createElement('div');
-  tmp.innerHTML = effectiveContent(); // detached element, used only for .innerText extraction
-  const body = tmp.innerText.trim().replace(/[ \t]*\n[ \t]*\n([ \t]*\n)+/g, '\n\n');
+  const tmpDoc = new DOMParser().parseFromString(effectiveContent(), 'text/html');
+  const body = tmpDoc.body.innerText.trim().replace(/[ \t]*\n[ \t]*\n([ \t]*\n)+/g, '\n\n');
   const plainText = `${title}\n\n${body}`;
   try {
     await navigator.clipboard.writeText(plainText);
@@ -1153,9 +1165,8 @@ function effectiveContent() {
 }
 
 function showStatus(el, type, html) {
-  // innerHTML is intentional: some messages contain links (e.g. msg_imported)
   el.className = `status ${type}`;
-  el.innerHTML = html;
+  safeSetHtml(el, html);
 }
 
 function clearStatus(el) {
