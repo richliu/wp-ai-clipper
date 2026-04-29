@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WP Clipper",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "Clip news articles and web content to WordPress as drafts",
   "permissions": [
     "activeTab",

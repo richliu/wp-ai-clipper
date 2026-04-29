@@ -295,17 +295,27 @@
 <!-- Settings View -->
 <div class="view" id="settingsView">
   <div class="field">
-    <label>WordPress 網址</label>
+    <label data-i18n="label_language">介面語言</label>
+    <select id="uiLanguage">
+      <option value="auto">自動 / Auto</option>
+      <option value="zh-TW">繁體中文</option>
+      <option value="en">English</option>
+    </select>
+  </div>
+  <hr class="divider" />
+
+  <div class="field">
+    <label data-i18n="label_wp_url">WordPress 網址</label>
     <input type="url" id="wpUrl" placeholder="https://poorman.org" />
   </div>
   <div class="field">
-    <label>使用者名稱</label>
+    <label data-i18n="label_wp_user">使用者名稱</label>
     <input type="text" id="wpUser" placeholder="admin" autocomplete="off" />
   </div>
   <div class="field">
     <label>Application Password</label>
     <input type="password" id="wpPass" placeholder="xxxx xxxx xxxx xxxx xxxx xxxx" autocomplete="off" />
-    <div class="hint">
+    <div class="hint" data-i18n-html="hint_app_password">
       從 WordPress 後台 → 使用者 → 你的個人檔案 → Application Passwords 產生。<br>
       <a id="wpAdminLink" href="#" target="_blank">直接前往 →</a>
     </div>
@@ -315,23 +325,23 @@
   <div class="field">
     <label class="toggle-row">
       <input type="checkbox" id="includeSourceUrl" checked />
-      將來源 URL 附加至文章
+      <span data-i18n="label_include_source">將來源 URL 附加至文章</span>
     </label>
-    <div class="hint">啟用時在文章末尾加入來源連結區塊（獨立的 block）</div>
+    <div class="hint" data-i18n="hint_include_source">啟用時在文章末尾加入來源連結區塊（獨立的 block）</div>
   </div>
 
   <div class="field">
     <label class="toggle-row">
       <input type="checkbox" id="stripUrlParams" checked />
-      移除 URL ? 後的參數
+      <span data-i18n="label_strip_params">移除 URL ? 後的參數</span>
     </label>
-    <div class="hint">儲存至 WordPress 前清除追蹤參數（如 utm_source、fbclid 等）</div>
+    <div class="hint" data-i18n="hint_strip_params">儲存至 WordPress 前清除追蹤參數（如 utm_source、fbclid 等）</div>
   </div>
 
   <div class="field" id="whitelistField" style="padding-left:22px">
-    <label>白名單參數（保留，逗號分隔）</label>
+    <label data-i18n="label_whitelist">白名單參數（保留，逗號分隔）</label>
     <input type="text" id="urlParamWhitelist" placeholder="id, p, article" autocomplete="off" />
-    <div class="hint">填入不想移除的參數名稱，例如：id, p</div>
+    <div class="hint" data-i18n="hint_whitelist">填入不想移除的參數名稱，例如：id, p</div>
   </div>
 
   <hr class="divider" />
@@ -341,7 +351,7 @@
   <hr class="divider" />
 
   <div class="field">
-    <label>設定備份</label>
+    <label data-i18n="label_backup">設定備份</label>
     <div class="btn-row">
       <button class="btn btn-ghost" id="exportBtn">↑ 匯出 JSON</button>
       <button class="btn btn-ghost" id="importToggleBtn">↓ 匯入 JSON</button>
@@ -361,7 +371,7 @@
 <!-- AI Settings View -->
 <div class="view" id="aiSettingsView">
   <div class="field">
-    <label>AI 供應商</label>
+    <label data-i18n="label_ai_provider">AI 供應商</label>
     <select id="aiProvider">
       <option value="deepseek">DeepSeek</option>
       <option value="openai">OpenAI / ChatGPT</option>
@@ -374,12 +384,12 @@
   <div class="field">
     <label>Model</label>
     <input type="text" id="aiModel" placeholder="deepseek-v4-pro" autocomplete="off" />
-    <div class="hint">DeepSeek 預設：deepseek-v4-pro（快速版：deepseek-v4-flash）　OpenAI 預設：gpt-4o</div>
+    <div class="hint" data-i18n="hint_ai_model">DeepSeek 預設：deepseek-v4-pro（快速版：deepseek-v4-flash）　OpenAI 預設：gpt-4o</div>
   </div>
   <div class="field">
     <label>Maximum Tokens</label>
     <input type="number" id="aiMaxTokens" placeholder="8192" min="1000" max="32768" />
-    <div class="hint">輸出 token 上限（非 context window）。DeepSeek Chat 最大 8192，gpt-4o 最大 16384</div>
+    <div class="hint" data-i18n="hint_ai_tokens">輸出 token 上限（非 context window）。DeepSeek Chat 最大 8192，gpt-4o 最大 16384</div>
   </div>
   <div class="btn-row">
     <button class="btn btn-primary" id="saveAiSettings" style="margin-top:0">儲存 AI 設定</button>
@@ -396,7 +406,7 @@
 
   <!-- Facebook mode -->
   <div id="fbModeSection" style="display:none">
-    <div class="fb-badge">📘 Facebook 貼文模式</div>
+    <div class="fb-badge" data-i18n="badge_fb_mode">📘 Facebook 貼文模式</div>
     <button class="btn btn-ghost" id="fbExpandBtn">
       ↕ 展開所有留言
     </button>
@@ -411,24 +421,24 @@
 
   <label class="preview-toggle" id="useSelectionWrap" style="display:none">
     <input type="checkbox" id="useSelection" checked />
-    僅匯入選取部分
+    <span data-i18n="label_use_selection">僅匯入選取部分</span>
   </label>
 
   <label class="preview-toggle" id="previewToggleWrap" style="display:none">
     <input type="checkbox" id="showPreview" checked />
-    顯示圖片預覽
+    <span data-i18n="label_show_preview">顯示圖片預覽</span>
   </label>
   <div class="preview-wrap">
     <img class="preview-img" id="previewImg" alt="Featured image preview" />
   </div>
 
   <div class="field">
-    <label>文章標題（可修改）</label>
+    <label data-i18n="label_post_title">文章標題（可修改）</label>
     <input type="text" id="postTitle" placeholder="文章標題" />
   </div>
 
   <div class="field">
-    <label>摘要（可選）</label>
+    <label data-i18n="label_excerpt">摘要（可選）</label>
     <textarea id="postExcerpt" rows="2" placeholder="留空則自動使用 meta description"></textarea>
   </div>
 

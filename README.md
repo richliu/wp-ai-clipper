@@ -1,6 +1,16 @@
+[English](README.en.md) | **繁體中文**
+
 # WP Clipper — Browser Extension
 
-將新聞網站文章一鍵匯入 WordPress 草稿，並保留原始來源連結。
+將網站文章一鍵匯入 WordPress ，並保留原始來源連結。
+
+使用 WordPress 蒐集文章者需要的小工具，上網看到文章想收錄到自己的 WordPress 用
+
+## 特色
+
+* AI 撰寫，未經人工修改
+* 設定檔僅保留在個人電腦，不需與任何地方連線(除了 API 和 WP) 
+* 完全 Open Source 
 
 ## 安裝方式
 
@@ -81,11 +91,18 @@
 - 可將所有設定（含 AI API Key）匯出為 JSON 備份
 - 可貼上 JSON 一鍵匯入還原
 
+
+### 特別處理網站
+
+以下網站會僅保留正文
+
+www.chinatimes.com # 中時電子報
+udn.com # 聯合報
+facebook.com # 臉書, 臉書預設保留留言, 另外需要點入單篇文章 (從時間處按滑鼠中鍵另開分頁)
+
 ---
 
 ## 後續計劃
 
-- [x] 選取文字只匯入選取部分
-- [x] AI 送出時，此時匯入功能應等待 AI 傳回資料再上傳
-- [ ] AI 自動依 WordPress 的分類設定分類、tag 和摘要（可設定預設值，也可在按 AI 時修改）
-- [ ] Facebook / Threads / Plurk 支援
+- [ ] Threads 
+- [ ] Plurk 支援
