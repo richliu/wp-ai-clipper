@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.13] - 2026-04-29
+### Added
+- AI 模型名稱下拉選單（`<datalist>`）：可從主流模型清單選取，也可自行輸入
+  - DeepSeek：deepseek-v4-pro、deepseek-v4-flash、deepseek-chat、deepseek-reasoner
+  - OpenAI：gpt-4o、gpt-4o-mini、gpt-4.1、gpt-4.1-mini、gpt-4.1-nano、o3、o4-mini
+  - 切換供應商時自動更新選單內容
+
+---
+
 ## [1.0.12] - 2026-04-29
 ### Added
 - 介面語言支援：繁體中文 / English（i18n）

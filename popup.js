@@ -21,7 +21,8 @@ const TRANSLATIONS = {
     btn_cancel: '取消',
     label_language: '介面語言',
     label_ai_provider: 'AI 供應商',
-    hint_ai_model: 'DeepSeek 預設：deepseek-v4-pro（快速版：deepseek-v4-flash）　OpenAI 預設：gpt-4o',
+    hint_ai_model: '可從下拉選單選取主流模型，或直接在下方輸入自訂名稱。',
+    label_model_select: '選擇模型',
     hint_ai_tokens: '輸出 token 上限（非 context window）。DeepSeek Chat 最大 8192，gpt-4o 最大 16384',
     btn_save_ai: '儲存 AI 設定',
     btn_test_ai: '測試連線',
@@ -95,7 +96,8 @@ const TRANSLATIONS = {
     btn_cancel: 'Cancel',
     label_language: 'Interface Language',
     label_ai_provider: 'AI Provider',
-    hint_ai_model: 'DeepSeek default: deepseek-v4-pro (fast: deepseek-v4-flash)  OpenAI default: gpt-4o',
+    hint_ai_model: 'Select a model from the dropdown, or type a custom name below.',
+    label_model_select: 'Select model',
     hint_ai_tokens: 'Output token limit (not context window). DeepSeek Chat max 8192, gpt-4o max 16384',
     btn_save_ai: 'Save AI Settings',
     btn_test_ai: 'Test Connection',
@@ -196,6 +198,11 @@ function applyTranslations() {
   if (!extractedData) {
     document.getElementById('pageTitle').textContent = t('msg_loading');
   }
+  // Refresh model preset placeholder text
+  const presetSel = document.getElementById('aiModelPreset');
+  if (presetSel && presetSel.options.length > 0) {
+    presetSel.options[0].text = `— ${t('label_model_select')} —`;
+  }
 }
 
 // Show version from manifest
@@ -259,6 +266,21 @@ const clipBtn           = document.getElementById('clipBtn');
 const clipStatus        = document.getElementById('clipStatus');
 
 const DEFAULT_MODELS = { deepseek: 'deepseek-v4-pro', openai: 'gpt-4o' };
+const MODEL_OPTIONS = {
+  deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner'],
+  openai:   ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'o3', 'o4-mini']
+};
+
+function updateModelOptions(provider) {
+  const sel = document.getElementById('aiModelPreset');
+  if (!sel) return;
+  const models = MODEL_OPTIONS[provider] || [];
+  sel.innerHTML = `<option value="">— ${t('label_model_select')} —</option>` +
+    models.map(m => `<option value="${m}">${m}</option>`).join('');
+  // Pre-select if current value matches a known model
+  const cur = aiModelInput ? aiModelInput.value : '';
+  sel.value = models.includes(cur) ? cur : '';
+}
 const FB_POST_RE = /^https?:\/\/(www\.|m\.)?facebook\.com\/([\w.%+-]+\/posts\/|permalink\.php|groups\/[^?#/]+\/posts\/|share\/p\/)/;
 
 // --- Init ---
@@ -293,6 +315,7 @@ async function init() {
   aiApiKeyInput.value    = aiCfg.aiApiKey   || '';
   aiModelInput.value     = aiCfg.aiModel    || DEFAULT_MODELS[aiProviderSel.value];
   aiMaxTokensInput.value = aiCfg.aiMaxTokens || 8192;
+  updateModelOptions(aiProviderSel.value);
 
   const hasConfig = cfg.wpUrl && cfg.wpUser && cfg.wpPass;
   if (!hasConfig) {
@@ -469,13 +492,20 @@ fbExpandBtn.addEventListener('click', async () => {
   }
 });
 
-// --- AI provider change: update default model ---
+// --- AI provider change: update default model and preset select ---
 aiProviderSel.addEventListener('change', () => {
   const def = DEFAULT_MODELS[aiProviderSel.value];
   aiModelInput.placeholder = def;
   if (!aiModelInput.value || Object.values(DEFAULT_MODELS).includes(aiModelInput.value)) {
     aiModelInput.value = def;
   }
+  updateModelOptions(aiProviderSel.value);
+});
+
+// --- Model preset select: fill text input ---
+document.getElementById('aiModelPreset').addEventListener('change', () => {
+  const val = document.getElementById('aiModelPreset').value;
+  if (val) aiModelInput.value = val;
 });
 
 // --- AI Clean ---
