@@ -895,6 +895,428 @@ async function extractPlurkPost() {
   return result;
 }
 
+// ===== THREADS SUPPORT ======================================
+
+const THREADS_POST_RE = /^https?:\/\/(www\.)?(threads\.com|threads\.net)\/@([\w.]+)\/post\/([A-Za-z0-9_-]+)/;
+
+function isThreadsPost() {
+  return THREADS_POST_RE.test(window.location.href);
+}
+
+function threadsEsc(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ===== Threads capture helpers (module scope) ===============================
+// Threads (React Native Web) virtualises long lists: posts that scroll out of
+// view are unmounted from the DOM. A single point-in-time scan can therefore
+// only ever see a slice of the conversation. We solve this by:
+//   1. Maintaining a per-URL persistent accumulator Map (window.__wpClipperThreadsSnap),
+//      keyed by postId so duplicates are naturally collapsed.
+//   2. Running a passive MutationObserver on Threads pages so the user's own
+//      scroll gestures silently feed posts into the accumulator.
+//   3. Having expandThreadsReplies() scroll incrementally (real scrollBy steps,
+//      not jump-to-bottom) and capture at every step.
+//   4. Having extractThreadsPost() seed its working snapshot from the
+//      accumulator before its own DOM scan, so it sees everything ever loaded.
+
+const THREADS_PERMALINK_RE = /^\/@([\w.]+)\/post\/([A-Za-z0-9_-]+)/;
+
+const THREADS_LABEL_RE = /^(串文|作者|追蹤|更多|翻譯|讚|留言|轉發|分享|查看|顯示更多|登入|註冊|Threads|Following|Author|More|Translate|Like|Reply|Repost|Share|View|Show more|Log in|Sign up|Reposted|轉發了)$/i;
+
+function _threadsFindContainer(anchor, ownPostId) {
+  let node = anchor;
+  while (node.parentElement && node.parentElement !== document.body) {
+    const parent = node.parentElement;
+    const parentLinks = parent.querySelectorAll('a[href*="/post/"]');
+    let foreignPost = false;
+    for (const other of parentLinks) {
+      const m = (other.getAttribute('href') || '').match(THREADS_PERMALINK_RE);
+      if (m && m[2] !== ownPostId) { foreignPost = true; break; }
+    }
+    if (foreignPost) break;
+    node = parent;
+  }
+  return node;
+}
+
+function _threadsExtractText(container) {
+  const lines = [];
+  const seen = new Set();
+  function add(raw) {
+    const t = (raw || '').trim();
+    if (!t || t.length <= 1) return;
+    if (/^\d[\d,.\s]*[KMB]?$/i.test(t)) return;
+    if (/^\d+\s*(分鐘|小時|天|週|個月|年|min|h|d|w|m|y)\s*前?$/i.test(t)) return;
+    if (THREADS_LABEL_RE.test(t)) return;
+    if (seen.has(t)) return;
+    seen.add(t);
+    lines.push(t);
+  }
+  for (const sp of container.querySelectorAll('span')) {
+    if (sp.querySelector('span')) continue;
+    add(sp.innerText || sp.textContent || '');
+  }
+  if (lines.length === 0) {
+    for (const line of (container.innerText || '').split(/\n/)) add(line);
+  }
+  return lines.join('\n');
+}
+
+function _threadsExtractImages(container) {
+  const imgs = [];
+  const seen = new Set();
+  for (const el of container.querySelectorAll('img, video[poster]')) {
+    const profileLink = el.closest('a[href^="/@"]');
+    if (profileLink) {
+      const href = profileLink.getAttribute('href') || '';
+      if (!/\/post\//.test(href)) continue;
+    }
+    const alt = el.getAttribute('alt') || '';
+    if (/profile picture|大頭貼|頭像|avatar/i.test(alt)) continue;
+    const src = el.tagName === 'VIDEO'
+      ? (el.getAttribute('poster') || '')
+      : (el.src || el.getAttribute('data-src') || '');
+    if (!src || !src.startsWith('https://')) continue;
+    if (/\/s\d{1,3}x\d{1,3}\//.test(src)) continue;
+    const w = el.naturalWidth || el.width || 0;
+    const h = el.naturalHeight || el.height || 0;
+    if (w && w < 80) continue;
+    if (h && h < 80) continue;
+    if (seen.has(src)) continue;
+    seen.add(src);
+    imgs.push({ src, alt });
+  }
+  return imgs;
+}
+
+// Capture all visible Threads posts into the given Map. Skips postIds that
+// already exist in the Map (so the first time we see a post wins — which is
+// what we want, because as the user scrolls past it the DOM may degrade or
+// even disappear). Returns the number of newly added posts.
+function _captureThreadsPosts(snapshot) {
+  let added = 0;
+  for (const a of document.querySelectorAll('a[href*="/post/"]')) {
+    const m = (a.getAttribute('href') || '').match(THREADS_PERMALINK_RE);
+    if (!m) continue;
+    const author = m[1];
+    const postId = m[2];
+    if (snapshot.has(postId)) continue;
+    const timeEl = a.querySelector('time[datetime]');
+    if (!timeEl) continue;
+    const datetime = timeEl.getAttribute('datetime') || '';
+    const container = _threadsFindContainer(a, postId);
+    const text = _threadsExtractText(container);
+    const imgs = _threadsExtractImages(container);
+    const top = a.getBoundingClientRect().top + window.scrollY;
+    snapshot.set(postId, { author, postId, datetime, text, imgs, top });
+    added++;
+  }
+  return added;
+}
+
+// Per-URL persistent accumulator. If the URL changes (user navigates to a
+// different post), reset so we don't leak data from the previous post.
+function _getThreadsAccumulator() {
+  const url = window.location.href;
+  if (!window.__wpClipperThreadsSnap || window.__wpClipperThreadsSnapUrl !== url) {
+    window.__wpClipperThreadsSnap = new Map();
+    window.__wpClipperThreadsSnapUrl = url;
+  }
+  return window.__wpClipperThreadsSnap;
+}
+
+// Passive observer: fire-and-forget on Threads pages. Captures into the
+// accumulator whenever the DOM mutates (which happens as the user scrolls
+// and React mounts new posts), throttled to ~300ms. This means users can
+// just scroll naturally and we silently collect everything they pass.
+function _installThreadsAutoCollector() {
+  if (window.__wpClipperThreadsObserverInstalled) return;
+  if (!isThreadsPost()) return;
+  window.__wpClipperThreadsObserverInstalled = true;
+
+  let scheduled = false;
+  const tick = () => {
+    scheduled = false;
+    try { _captureThreadsPosts(_getThreadsAccumulator()); } catch (_) {}
+  };
+  const schedule = () => {
+    if (scheduled) return;
+    scheduled = true;
+    setTimeout(tick, 300);
+  };
+
+  // Initial capture in case posts are already on screen.
+  schedule();
+
+  const obs = new MutationObserver(schedule);
+  try {
+    obs.observe(document.body, { childList: true, subtree: true });
+  } catch (_) { /* document.body might not be ready */ }
+
+  // Also capture on scroll (cheap; the observer should cover this but the
+  // belt-and-braces version is cheap and helps if mutations are batched).
+  window.addEventListener('scroll', schedule, { passive: true });
+}
+
+// Try to install immediately, and again on DOMContentLoaded if body isn't ready.
+try { _installThreadsAutoCollector(); } catch (_) {}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    try { _installThreadsAutoCollector(); } catch (_) {}
+  });
+}
+
+async function extractThreadsPost() {
+  const url = window.location.href;
+  const urlMatch = url.match(THREADS_POST_RE);
+  const urlUsername = urlMatch?.[3] || '';
+  const urlPostId   = urlMatch?.[4] || '';
+
+  const result = {
+    url, platform: 'threads', siteName: 'Threads',
+    title: '', content: '', excerpt: '', featuredImageUrl: '',
+    images: [], comments: []
+  };
+
+  // Make sure the passive auto-collector is running (idempotent).
+  try { _installThreadsAutoCollector(); } catch (_) {}
+
+  // The accumulator persists everything we've ever seen on this URL —
+  // populated by the passive MutationObserver (user's manual scroll) and by
+  // expandThreadsReplies()'s incremental scroll. We use it as our snapshot
+  // directly, then top up with one final scan of the current DOM in case
+  // the observer's debounce hasn't fired yet.
+  const snapshot = _getThreadsAccumulator();
+  const __growthTrace = [snapshot.size];
+  await new Promise(r => setTimeout(r, 200));
+  _captureThreadsPosts(snapshot);
+  __growthTrace.push(snapshot.size);
+
+  const __didScroll = false;
+  const LOW_THRESHOLD = 10;
+  let __hint = '';
+  if (snapshot.size < LOW_THRESHOLD) {
+    __hint = '只擷取到少量貼文。請手動捲動頁面瀏覽完整討論串（系統會自動累積），或點擊「載入全部回覆」按鈕後再重新擷取。 / Few posts captured — scroll the page manually to browse the whole thread (auto-collected in background) or click "Load All Replies", then re-extract.';
+    console.warn('[WP Clipper / Threads]', __hint, 'snapshot=', snapshot.size);
+  }
+
+  // Raw DOM counts at the END of warmup — useful to compare against
+  // snapshot.size to see if our matchers are missing something.
+  const __rawCounts = {
+    permalinkAnchors: document.querySelectorAll('a[href*="/post/"]').length,
+    permalinkAnchorsMatchingRe: Array.from(document.querySelectorAll('a[href*="/post/"]'))
+      .filter(a => THREADS_PERMALINK_RE.test(a.getAttribute('href') || '')).length,
+    timeElements: document.querySelectorAll('time[datetime]').length,
+    permalinkAnchorsWithTime: Array.from(document.querySelectorAll('a[href*="/post/"]'))
+      .filter(a => THREADS_PERMALINK_RE.test(a.getAttribute('href') || '') && a.querySelector('time[datetime]')).length,
+  };
+
+  if (snapshot.size === 0) {
+    result.title = document.title;
+    return result;
+  }
+
+  // ----- Identify main post and trim "More from author" tail --------------
+  // Threads page DOM order (top-to-bottom):
+  //   1. Main post (by author U, matches URL postId)
+  //   2. Author's continuation posts (related thread chain) — same author U
+  //   3. Replies, interleaved with author's in-thread responses
+  //   4. "More from author" — UNRELATED older posts by U appearing as feed
+  //
+  // We keep 1-3 (so author continuations + their nested replies are all
+  // included as comments in DOM order) and trim 4 by datetime: any post
+  // dated significantly before the main post is treated as feed clutter.
+  const ordered = Array.from(snapshot.values()).sort((a, b) => a.top - b.top);
+  let mainCaptured = ordered.find(p => p.postId === urlPostId) || ordered[0];
+  const mainTimeMs = mainCaptured.datetime ? new Date(mainCaptured.datetime).getTime() : NaN;
+  const STALE_MS = 12 * 60 * 60 * 1000; // 12h before main = "older feed"
+  const fresh = ordered.filter(p => {
+    if (!p.datetime || isNaN(mainTimeMs)) return true;
+    return new Date(p.datetime).getTime() >= mainTimeMs - STALE_MS;
+  });
+  const otherCaptured = fresh.filter(p => p.postId !== mainCaptured.postId);
+  const __trimmedTail = ordered.length - fresh.length;
+
+  // --- Main post header ---
+  let postAuthor = mainCaptured.author;
+  const ogTitle = document.querySelector('meta[property="og:title"]')?.content || '';
+  if (ogTitle) {
+    const m = ogTitle.match(/^(.+?)\s+on Threads/i) || ogTitle.match(/^(.+?)\s*[•·|]/);
+    if (m) postAuthor = m[1].trim();
+  }
+  const mainDate = mainCaptured.datetime ? new Date(mainCaptured.datetime) : null;
+  const postTime = (mainDate && !isNaN(mainDate)) ? mainDate.toLocaleString('zh-TW') : '';
+
+  let postText = mainCaptured.text;
+  if (!postText) postText = document.querySelector('meta[property="og:description"]')?.content || '';
+
+  const mainImages = mainCaptured.imgs;
+  mainImages.forEach(img => {
+    if (!result.featuredImageUrl) result.featuredImageUrl = img.src;
+    result.images.push(img);
+  });
+  if (!result.featuredImageUrl) {
+    result.featuredImageUrl = document.querySelector('meta[property="og:image"]')?.content || '';
+  }
+
+  // --- Replies ---
+  const comments = otherCaptured.map(p => {
+    const d = p.datetime ? new Date(p.datetime) : null;
+    const time = (d && !isNaN(d)) ? d.toLocaleString('zh-TW') : '';
+    return { author: p.author, time, text: p.text, imgs: p.imgs };
+  });
+  // Re-alias to keep downstream HTML-build code untouched
+  const mainPost = mainCaptured;
+  const uniquePosts = ordered;
+
+  result.comments = comments;
+  const _mainAuthorIds = new Set([urlUsername, mainPost.author].filter(Boolean));
+  result._diag = {
+    totalPosts: uniquePosts.length,
+    comments: comments.length,
+    authorOwn: comments.filter(c => _mainAuthorIds.has(c.author)).length,
+    others: comments.filter(c => !_mainAuthorIds.has(c.author)).length,
+    trimmedTail: __trimmedTail,
+    mainImages: mainImages.length,
+    didScroll: __didScroll,
+    growthTrace: __growthTrace,
+    rawDomCounts: __rawCounts,
+    hint: __hint || undefined,
+    replyDetails: comments.map(c => ({
+      author: c.author, textLen: c.text.length, imgs: c.imgs.length
+    }))
+  };
+  if (__hint) result._hint = __hint;
+  try { window.__wpClipperDiag = result._diag; } catch (_) {}
+  console.log('[WP Clipper / Threads]', JSON.stringify(result._diag),
+              'main:', JSON.stringify({ author: postAuthor, postId: mainPost.postId, textLen: postText.length }));
+
+  // --- Build WordPress HTML (proper Gutenberg block markup) ---
+  const year = mainDate ? mainDate.getFullYear() : new Date().getFullYear();
+  result.title = `${year} ${postAuthor || urlUsername} Threads 貼文`;
+  result.excerpt = postText.slice(0, 200).replace(/\s+/g, ' ') + (postText.length > 200 ? '…' : '');
+
+  // Helpers that emit Gutenberg block markup so WP doesn't strip / merge.
+  const wpParagraph = (innerHtml) =>
+    `<!-- wp:paragraph -->\n<p>${innerHtml}</p>\n<!-- /wp:paragraph -->\n`;
+  const wpHeading = (level, innerHtml) =>
+    `<!-- wp:heading {"level":${level}} -->\n<h${level}>${innerHtml}</h${level}>\n<!-- /wp:heading -->\n`;
+  const wpSeparator = () =>
+    `<!-- wp:separator -->\n<hr class="wp-block-separator has-alpha-channel-opacity"/>\n<!-- /wp:separator -->\n`;
+  const wpImage = (src, alt) =>
+    `<!-- wp:image -->\n<figure class="wp-block-image"><img src="${src}" alt="${threadsEsc(alt)}"/></figure>\n<!-- /wp:image -->\n`;
+  const wpQuote = (innerHtml) =>
+    `<!-- wp:quote -->\n<blockquote class="wp-block-quote">${innerHtml}</blockquote>\n<!-- /wp:quote -->\n`;
+
+  // Header line for main post
+  let header = '';
+  if (postAuthor) header += `<strong>${threadsEsc(postAuthor)}</strong>`;
+  if (urlUsername && postAuthor !== urlUsername) header += ` (@${threadsEsc(urlUsername)})`;
+  if (postTime) header += ` · <small>${threadsEsc(postTime)}</small>`;
+
+  let html = '';
+  if (header) html += wpParagraph(header);
+
+  postText.split('\n').filter(l => l.trim()).forEach(line => {
+    html += wpParagraph(threadsEsc(line));
+  });
+
+  mainImages.forEach(({ src, alt }) => {
+    html += wpImage(src, alt);
+  });
+
+  // Render comments in DOM order (author continuations + replies interleaved
+  // exactly as Threads displays them).
+  if (comments.length > 0) {
+    html += wpSeparator();
+    html += wpHeading(3, threadsEsc(`回覆與續串（${comments.length}）`));
+    comments.forEach(({ author, time, text, imgs }) => {
+      const isAuthor = _mainAuthorIds.has(author);
+      const tag = isAuthor ? '【作者】' : '';
+      let inner = `\n<p><strong>${threadsEsc(tag + author)}</strong>`;
+      if (time) inner += ` · <small>${threadsEsc(time)}</small>`;
+      inner += '</p>\n';
+      text.split('\n').filter(l => l.trim()).forEach(line => {
+        inner += `<p>${threadsEsc(line)}</p>\n`;
+      });
+      html += wpQuote(inner);
+      imgs.forEach(({ src, alt }) => { html += wpImage(src, alt); });
+    });
+  }
+
+  result.content = html;
+
+  // Restore scroll AFTER all DOM extraction is done. By now every text
+  // / image / container reference has been resolved into JS strings, so
+  // it doesn't matter if the page virtualises items away.
+  if (__didScroll) {
+    try { window.scrollTo(0, __origScroll); } catch (_) {}
+  }
+
+  return result;
+}
+
+async function expandThreadsReplies() {
+  // Incrementally scroll the page from current position to the bottom in
+  // small steps, capturing into the persistent accumulator at every step.
+  // Why incremental: jumping straight to scrollHeight makes React unmount
+  // the middle posts before we ever read them. Stepping by ~70% viewport
+  // gives the renderer time to mount each batch so we can capture it.
+  try { _installThreadsAutoCollector(); } catch (_) {}
+  const acc = _getThreadsAccumulator();
+  _captureThreadsPosts(acc);
+
+  const STEP = Math.max(Math.floor(window.innerHeight * 0.7), 400);
+  const SETTLE_MS = 1200;
+  const MAX_STUCK_AT_BOTTOM = 3;
+  const HARD_MAX_STEPS = 200; // safety: ~4 minutes max
+
+  let stuckAtBottom = 0;
+  let lastSize = acc.size;
+  let stuckRounds = 0;
+
+  for (let step = 0; step < HARD_MAX_STEPS; step++) {
+    const beforeY = window.scrollY;
+    window.scrollBy(0, STEP);
+    await new Promise(r => setTimeout(r, SETTLE_MS));
+    _captureThreadsPosts(acc);
+
+    const atBottom =
+      window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 50;
+    const movedY = window.scrollY - beforeY;
+    const grew = acc.size > lastSize;
+    lastSize = acc.size;
+
+    if (grew) {
+      stuckRounds = 0;
+    } else {
+      stuckRounds++;
+    }
+
+    if (atBottom) {
+      stuckAtBottom++;
+      // Give the bottom-of-list sentinel a few extra beats to load more,
+      // but bail if nothing new arrives.
+      if (stuckAtBottom >= MAX_STUCK_AT_BOTTOM && !grew) break;
+      await new Promise(r => setTimeout(r, 800));
+    } else {
+      stuckAtBottom = 0;
+    }
+
+    // If we couldn't scroll AND nothing new is appearing, stop.
+    if (movedY < 5 && stuckRounds >= 3) break;
+  }
+
+  // Scroll back to top so the user (and a follow-up extraction) lands at
+  // the main post. Data is already safely in the accumulator.
+  window.scrollTo(0, 0);
+  await new Promise(r => setTimeout(r, 400));
+  _captureThreadsPosts(acc);
+
+  return acc.size;
+}
+
 // ===== MESSAGE LISTENER =====================================
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -903,11 +1325,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       extractPlurkPost()
         .then(data => sendResponse({ success: true, data }))
         .catch(e   => sendResponse({ success: false, error: e.message }));
+    } else if (isThreadsPost()) {
+      extractThreadsPost()
+        .then(data => sendResponse({ success: true, data }))
+        .catch(e   => sendResponse({ success: false, error: e.message }));
     } else {
       try {
-        const data = isFacebookPost() ? extractFbPost()
-                  : isChinatimes()    ? extractChinatimes()
-                  : isUdn()           ? extractUdn()
+        const data = isFacebookPost()    ? extractFbPost()
+                  : isChinatimes()       ? extractChinatimes()
+                  : isUdn()              ? extractUdn()
                   : extractContent();
         sendResponse({ success: true, data });
       } catch (e) {
@@ -920,6 +1346,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .catch(err  => sendResponse({ success: false, error: err.message }));
   } else if (msg.action === 'expandPlurkResponses') {
     expandPlurkResponses()
+      .then(count => sendResponse({ success: true, count }))
+      .catch(err  => sendResponse({ success: false, error: err.message }));
+  } else if (msg.action === 'expandThreadsReplies') {
+    expandThreadsReplies()
       .then(count => sendResponse({ success: true, count }))
       .catch(err  => sendResponse({ success: false, error: err.message }));
   }

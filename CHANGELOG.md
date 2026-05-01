@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.2.0] - 2026-05-01
+### Added
+- **Threads 貼文支援**：`threads.com` / `threads.net` 單篇貼文頁面（`/@user/post/<id>`）專屬提取器
+  - 主貼文 + 作者續串 + 留言全部擷取，依 DOM 順序排列
+  - 自動排除「More from author」尾段（datetime 早於主貼文 12 小時以上的舊貼文）
+  - 留言中作者本人回覆自動加上「【作者】」前綴
+  - 內文與精選圖片自動上傳至 WordPress 媒體庫
+- **持續累積式擷取（解決 Threads 虛擬列表）**：Threads 採用 React Native Web 虛擬化，捲出視窗的貼文會被卸載。新增：
+  - 模組層級的持久累積器 `window.__wpClipperThreadsSnap`（依 URL 重置，依 `postId` 去重）
+  - 被動式 `MutationObserver` + 捲動監聽器：使用者手動捲動瀏覽討論串時，系統會在背景悄悄累積看到的每一則貼文
+  - 「載入全部回覆」按鈕改為遞增式捲動（每次 0.7 視窗高度，1.2 秒緩衝），每步都把新貼文寫入累積器，避免一次跳到底部導致中段被卸載
+  - `extractThreadsPost()` 直接從累積器取資料 + 一次當前 DOM 補抓
+- **媒體庫去重複（debug 加速）**：`background.js` 上傳圖片前先以 SHA-256 雜湊計算 16 字元 slug（`clip-<hash>`），透過 WP REST API `?search=` 比對 title / slug / source_url，命中即重用既有 media，不再重覆上傳
+
+### Fixed
+- popup.js 兩處硬編中文 fallback 字串改為 i18n key（`msg_threads_load_fail`、`msg_plurk_expand_fail`）
+- Threads 擷取移除原本的 25 輪自動捲動 warmup（Threads 對 `event.isTrusted === false` 的合成捲動事件會限制懶載入觸發，徒勞耗時 30 秒以上）
+
+---
+
 ## [1.1.0] - 2026-04-30
 ### Added
 - 內文圖片上傳：匯入時自動將文章內所有 `<img>` 上傳至 WordPress 媒體庫並取代連結（設定面板可關閉，預設開啟）

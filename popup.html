@@ -278,6 +278,18 @@
       display: flex; align-items: center; gap: 6px;
     }
 
+    /* Threads mode */
+    .threads-badge {
+      background: rgba(0,0,0,0.06);
+      border: 1px solid rgba(0,0,0,0.15);
+      border-radius: var(--radius);
+      color: #333;
+      font-size: 12px; font-weight: 500;
+      padding: 7px 10px;
+      margin-bottom: 10px;
+      display: flex; align-items: center; gap: 6px;
+    }
+
     /* Plurk mode */
     .plurk-badge {
       background: rgba(255,102,0,0.08);
@@ -463,6 +475,14 @@
       ↕ 展開所有留言
     </button>
     <div class="status" id="fbExpandStatus"></div>
+    <hr class="divider" style="margin-top:10px">
+  </div>
+
+  <!-- Threads mode -->
+  <div id="threadsModeSection" style="display:none">
+    <div class="threads-badge" data-i18n="badge_threads_mode">🧵 Threads 貼文模式</div>
+    <button class="btn btn-ghost" id="threadsExpandBtn" data-i18n="btn_threads_expand">↕ 載入全部回覆</button>
+    <div class="status" id="threadsExpandStatus"></div>
     <hr class="divider" style="margin-top:10px">
   </div>
 

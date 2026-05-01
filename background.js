@@ -156,8 +156,50 @@ async function uploadImageFromUrl(base, headers, imageUrl, altText, articleUrl) 
 
   const blob = await imgRes.blob();
   const contentType = blob.type || 'image/jpeg';
-  const ext = contentType.split('/')[1] || 'jpg';
-  const filename = `clipped-${Date.now()}.${ext}`;
+  let ext = (contentType.split('/')[1] || 'jpg').replace(/[^a-z0-9]/gi, '').toLowerCase();
+  if (ext === 'jpeg') ext = 'jpg';
+  if (!ext) ext = 'jpg';
+
+  // Dedup: hash the blob and use it as the filename slug. If WP already
+  // has media with that slug, reuse it instead of re-uploading. Big win
+  // during repeated debug runs on the same article.
+  const hashBuf = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+  const hash = Array.from(new Uint8Array(hashBuf))
+    .map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
+  const slug = `clip-${hash}`;
+  const filename = `${slug}.${ext}`;
+
+  // Look up by search (title/filename). WP's slug filter is unreliable for
+  // attachments, but title defaults to the upload filename minus extension,
+  // so searching for our deterministic slug almost always finds prior runs.
+  try {
+    const lookupUrl = `${base}/wp-json/wp/v2/media?search=${encodeURIComponent(slug)}&per_page=10&context=edit`;
+    const lookupRes = await fetch(lookupUrl, {
+      headers: { 'Authorization': headers['Authorization'] },
+      credentials: 'omit'
+    });
+    if (lookupRes.ok) {
+      const arr = await lookupRes.json();
+      if (Array.isArray(arr)) {
+        // Match: title equals slug, OR slug equals slug, OR source_url ends with slug.<ext>
+        const hit = arr.find(m => {
+          const t = (m.title && (m.title.rendered || m.title)) || '';
+          if (t === slug) return true;
+          if (m.slug === slug) return true;
+          if (typeof m.source_url === 'string' && m.source_url.includes(`/${slug}.`)) return true;
+          return false;
+        });
+        if (hit && hit.id) {
+          console.log('[WP Clipper] Reusing existing media', hit.id, slug, hit.source_url);
+          return { id: hit.id, sourceUrl: hit.source_url };
+        }
+      }
+    } else {
+      console.warn('[WP Clipper] Media lookup HTTP', lookupRes.status);
+    }
+  } catch (e) {
+    console.warn('[WP Clipper] Media dedup lookup failed, will upload:', e.message);
+  }
 
   const uploadHeaders = {
     ...headers,

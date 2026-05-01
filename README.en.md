@@ -70,6 +70,14 @@ A handy tool for WordPress users who collect articles while browsing the web.
 4. Choose filter options (backup images, backup links, exclude emoji-only responses)
 5. Click **Backup All** to import directly as a WordPress draft
 
+### Threads Post Clipping
+1. Open a single Threads post (`threads.com/@user/post/<id>`)
+2. Click the ✂ icon — the popup automatically enters **Threads Post Mode**
+3. **Scroll the page manually to browse the whole thread** (important: Threads uses a virtualised list — posts that scroll out of view are unmounted; the extension continuously accumulates everything you scroll past in the background)
+   - Or click **Load All Replies** to auto-scroll incrementally
+4. Click **✂ Import as Draft** to upload to WordPress
+5. The main post, author continuations, and all replies are imported in DOM order; the author's own replies are automatically tagged with a 【作者】 prefix
+
 ---
 
 ## Features in Detail
@@ -111,9 +119,10 @@ The following sites use custom extractors that keep only the main article body:
 - `udn.com` — United Daily News
 - `facebook.com` — Facebook posts (comments are preserved by default; open individual posts by middle-clicking the timestamp)
 - `plurk.com/p/*` — Plurk post pages (backup mode)
+- `threads.com` / `threads.net` — Threads single post pages (continuous accumulation, captures author continuations and all replies)
 
 ---
 
 ## Roadmap
 
-- [ ] Threads support
+- [x] Threads support (v1.2.0)

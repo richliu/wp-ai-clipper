@@ -85,6 +85,12 @@ const TRANSLATIONS = {
     msg_fb_fail: '失敗：',
     msg_ai_saved: '✓ AI 設定已儲存',
     ai_clean_prompt: '我要擷取這篇文章，但是會同時抓到很多不相干的內容，請將本文以外的不相關內容移除，本文原封不動不修改。只回傳清理後的 HTML 內容，不要加任何解釋或 markdown 標記。\n\n以下是待清理的 HTML 內容：\n\n',
+    // Threads
+    badge_threads_mode: '🧵 Threads 貼文模式',
+    btn_threads_expand: '↕ 載入全部回覆',
+    msg_threads_expanding: '正在捲動載入回覆，請稍候…',
+    msg_threads_expanded: (n) => `✓ 已載入 ${n} 則，重新擷取中…`,
+    msg_threads_load_fail: '載入失敗',
     // Plurk
     badge_plurk_mode: '🐧 Plurk 串備份模式',
     btn_plurk_expand: '↕ 展開全部回應',
@@ -99,6 +105,7 @@ const TRANSLATIONS = {
     placeholder_plurk_custom: '輸入自訂 AI 提示詞…（回應文字將自動附加於後）',
     msg_plurk_responses: (loaded, total) => loaded >= total ? `已載入全部 ${total} 則回應` : `已載入 ${loaded} / ${total} 則回應（尚有未展開）`,
     msg_plurk_expanding: '正在展開回應，請稍候…',
+    msg_plurk_expand_fail: '展開失敗',
     msg_plurk_expanded: (loaded, total) => `✓ 已載入 ${loaded} / ${total} 則`,
     msg_plurk_need_prompt: '請輸入自訂提示詞',
     msg_plurk_ai_select: (batch, total) => `AI 精選中… 第 ${batch}/${total} 批`,
@@ -193,6 +200,12 @@ const TRANSLATIONS = {
     msg_fb_fail: 'Failed: ',
     msg_ai_saved: '✓ AI settings saved',
     ai_clean_prompt: 'I want to clip this article, but there is a lot of irrelevant content mixed in. Please remove everything that is not part of the main article body, without modifying the main content. Return only the cleaned HTML, without any explanation or markdown markers.\n\nHere is the HTML to clean:\n\n',
+    // Threads
+    badge_threads_mode: '🧵 Threads Post Mode',
+    btn_threads_expand: '↕ Load All Replies',
+    msg_threads_expanding: 'Scrolling to load replies, please wait…',
+    msg_threads_expanded: (n) => `✓ Loaded ${n} replies, re-extracting…`,
+    msg_threads_load_fail: 'Load failed',
     // Plurk
     badge_plurk_mode: '🐧 Plurk Thread Backup Mode',
     btn_plurk_expand: '↕ Expand All Responses',
@@ -207,6 +220,7 @@ const TRANSLATIONS = {
     placeholder_plurk_custom: 'Enter custom AI prompt… (responses will be appended)',
     msg_plurk_responses: (loaded, total) => loaded >= total ? `All ${total} responses loaded` : `Loaded ${loaded} / ${total} responses (more not yet expanded)`,
     msg_plurk_expanding: 'Expanding responses, please wait…',
+    msg_plurk_expand_fail: 'Expand failed',
     msg_plurk_expanded: (loaded, total) => `✓ Loaded ${loaded} / ${total}`,
     msg_plurk_need_prompt: 'Please enter a custom prompt',
     msg_plurk_ai_select: (batch, total) => `AI selecting… batch ${batch}/${total}`,
@@ -344,6 +358,9 @@ const plurkNoEmojiChk      = document.getElementById('plurkNoEmoji');
 const fbModeSection  = document.getElementById('fbModeSection');
 const fbExpandBtn    = document.getElementById('fbExpandBtn');
 const fbExpandStatus = document.getElementById('fbExpandStatus');
+
+const threadsExpandBtn    = document.getElementById('threadsExpandBtn');
+const threadsExpandStatus = document.getElementById('threadsExpandStatus');
 const useSelectionWrap  = document.getElementById('useSelectionWrap');
 const useSelectionChk   = document.getElementById('useSelection');
 const showPreviewChk    = document.getElementById('showPreview');
@@ -386,10 +403,26 @@ function updateModelOptions(provider) {
   const cur = aiModelInput ? aiModelInput.value : '';
   sel.value = models.includes(cur) ? cur : '';
 }
-const FB_POST_RE    = /^https?:\/\/(www\.|m\.)?facebook\.com\/([\w.%+-]+\/posts\/|permalink\.php|groups\/[^?#/]+\/posts\/|share\/p\/)/;
-const PLURK_POST_RE = /^https?:\/\/(www\.)?plurk\.com\/(p|m\/p)\/([a-zA-Z0-9]+)/;
+const FB_POST_RE      = /^https?:\/\/(www\.|m\.)?facebook\.com\/([\w.%+-]+\/posts\/|permalink\.php|groups\/[^?#/]+\/posts\/|share\/p\/)/;
+const PLURK_POST_RE   = /^https?:\/\/(www\.)?plurk\.com\/(p|m\/p)\/([a-zA-Z0-9]+)/;
+const THREADS_POST_RE = /^https?:\/\/(www\.)?(threads\.com|threads\.net)\/@([\w.]+)\/post\/([A-Za-z0-9_-]+)/;
 
 // --- Init ---
+// Send a message to the active tab's content script. If the script hasn't been
+// injected yet (e.g. the tab was opened before the extension loaded/updated),
+// inject content.js on demand and retry once. Restricted pages (chrome://,
+// the web store, etc.) will still throw — caller handles that.
+async function sendToContent(tabId, msg) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, msg);
+  } catch (e) {
+    const m = e && e.message || '';
+    if (!/Receiving end does not exist|Could not establish connection/i.test(m)) throw e;
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+    return await chrome.tabs.sendMessage(tabId, msg);
+  }
+}
+
 async function init() {
   const cfg   = await loadConfig();
   const aiCfg = await loadAiConfig();
@@ -442,8 +475,12 @@ async function init() {
     if (PLURK_POST_RE.test(tab.url || '')) {
       plurkModeSection.style.display = 'block';
     }
+    if (THREADS_POST_RE.test(tab.url || '')) {
+      const threadsBadge = document.getElementById('threadsModeSection');
+      if (threadsBadge) threadsBadge.style.display = 'block';
+    }
 
-    const resp = await chrome.tabs.sendMessage(tab.id, { action: 'extractContent' });
+    const resp = await sendToContent(tab.id, { action: 'extractContent' });
     if (resp && resp.success) {
       extractedData = resp.data;
       pageTitle.textContent = extractedData.title || t('msg_no_title');
@@ -516,6 +553,28 @@ showPreviewChk.addEventListener('change', () => {
   previewImg.classList.toggle('visible', showPreviewChk.checked);
 });
 
+// --- Fetch external image → base64 data URL (for Word-compatible clipboard) ---
+async function fetchAsDataUrl(url) {
+  const resp = await fetch(url);
+  const blob = await resp.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Replace all <img src="http..."> in HTML string with embedded data URLs
+async function embedImages(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const imgs = Array.from(doc.querySelectorAll('img[src]')).filter(img => img.src.startsWith('http'));
+  await Promise.all(imgs.map(async img => {
+    try { img.src = await fetchAsDataUrl(img.src); } catch { /* keep original */ }
+  }));
+  return doc.body.innerHTML;
+}
+
 // --- Copy content ---
 copyBtn.addEventListener('click', async () => {
   if (!extractedData) return;
@@ -523,8 +582,9 @@ copyBtn.addEventListener('click', async () => {
   const imgHtml = extractedData.featuredImageUrl
     ? `<figure><img src="${extractedData.featuredImageUrl}" alt="${title}" style="max-width:100%;height:auto;" /></figure>\n`
     : '';
-  const html = `<h2>${title}</h2>\n${imgHtml}${effectiveContent()}`;
+  const rawHtml = `<h2>${title}</h2>\n${imgHtml}${effectiveContent()}`;
   try {
+    const html = await embedImages(rawHtml);
     await navigator.clipboard.write([
       new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }) })
     ]);
@@ -584,14 +644,14 @@ fbExpandBtn.addEventListener('click', async () => {
   showStatus(fbExpandStatus, 'success', t('msg_fb_expanding'));
 
   try {
-    const resp = await chrome.tabs.sendMessage(tab.id, { action: 'expandFbComments' });
+    const resp = await sendToContent(tab.id, { action: 'expandFbComments' });
 
     if (!resp?.success) throw new Error(resp?.error || t('msg_fb_fail'));
 
     showStatus(fbExpandStatus, 'success', t('msg_fb_expanded'));
 
     // Re-extract after expansion
-    const extracted = await chrome.tabs.sendMessage(tab.id, { action: 'extractContent' });
+    const extracted = await sendToContent(tab.id, { action: 'extractContent' });
     if (extracted?.success) {
       extractedData = extracted.data;
       postTitle.value   = extractedData.title   || postTitle.value;
@@ -775,6 +835,34 @@ function plurkOpts() {
 }
 
 
+// --- Threads: load all replies ---
+threadsExpandBtn.addEventListener('click', async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  threadsExpandBtn.disabled = true;
+  setSpinnerBtn(threadsExpandBtn, 'msg_threads_expanding');
+  showStatus(threadsExpandStatus, 'success', t('msg_threads_expanding'));
+
+  try {
+    const resp = await sendToContent(tab.id, { action: 'expandThreadsReplies' });
+    if (!resp?.success) throw new Error(resp?.error || '');
+
+    showStatus(threadsExpandStatus, 'success', t('msg_threads_expanded', resp.count));
+
+    const extracted = await sendToContent(tab.id, { action: 'extractContent' });
+    if (extracted?.success) {
+      extractedData = extracted.data;
+      postTitle.value   = extractedData.title   || postTitle.value;
+      postExcerpt.value = extractedData.excerpt || postExcerpt.value;
+      pageTitle.textContent = extractedData.title || t('msg_no_title');
+    }
+  } catch (e) {
+    showStatus(threadsExpandStatus, 'error', escHtml(e.message || t('msg_threads_load_fail')));
+  } finally {
+    threadsExpandBtn.disabled = false;
+    threadsExpandBtn.textContent = t('btn_threads_expand');
+  }
+});
+
 // --- Plurk: expand responses ---
 plurkExpandBtn.addEventListener('click', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -783,11 +871,11 @@ plurkExpandBtn.addEventListener('click', async () => {
   showStatus(plurkExpandStatus, 'success', t('msg_plurk_expanding'));
 
   try {
-    const resp = await chrome.tabs.sendMessage(tab.id, { action: 'expandPlurkResponses' });
+    const resp = await sendToContent(tab.id, { action: 'expandPlurkResponses' });
     if (!resp?.success) throw new Error(resp?.error || '');
 
     // Re-extract
-    const extracted = await chrome.tabs.sendMessage(tab.id, { action: 'extractContent' });
+    const extracted = await sendToContent(tab.id, { action: 'extractContent' });
     if (extracted?.success) {
       extractedData = extracted.data;
       postTitle.value   = extractedData.title   || postTitle.value;
@@ -798,7 +886,7 @@ plurkExpandBtn.addEventListener('click', async () => {
         t('msg_plurk_expanded', pd.loadedCount, pd.responseCount));
     }
   } catch (e) {
-    showStatus(plurkExpandStatus, 'error', escHtml(e.message || '展開失敗'));
+    showStatus(plurkExpandStatus, 'error', escHtml(e.message || t('msg_plurk_expand_fail')));
   } finally {
     plurkExpandBtn.disabled = false;
     plurkExpandBtn.textContent = t('btn_plurk_expand');
