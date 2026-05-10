@@ -13,6 +13,15 @@ const TRANSLATIONS = {
     label_upload_inline: '上傳內文圖片到媒體庫',
     hint_upload_inline: '將文章內所有圖片上傳至 WordPress 媒體庫並取代連結（超過 10 張時會提示確認）',
     msg_many_images: count => `文章內有 ${count} 張圖片，確定要全部上傳到媒體庫嗎？`,
+    label_img_picker: '圖片選擇',
+    btn_select_all: '全選',
+    btn_select_none: '全不選',
+    btn_drop_icons: '去小圖',
+    hint_img_picker: '點擊縮圖切換是否上傳；過小或載入失敗的圖會自動取消',
+    msg_img_count: (sel, total) => `已選 ${sel} / ${total}`,
+    label_featured_short: '主圖',
+    msg_progress_upload: (i, n) => `上傳圖片 ${i} / ${n}…`,
+    msg_progress_create: '建立草稿…',
     label_include_source: '將來源 URL 附加至文章',
     hint_include_source: '啟用時在文章末尾加入來源連結區塊（獨立的 block）',
     label_strip_params: '移除 URL ? 後的參數',
@@ -128,6 +137,15 @@ const TRANSLATIONS = {
     label_upload_inline: 'Upload inline images to media library',
     hint_upload_inline: 'Uploads all images in the article to WordPress media library and replaces URLs (warns if more than 10)',
     msg_many_images: count => `This article contains ${count} images. Upload all of them to the media library?`,
+    label_img_picker: 'Image Selection',
+    btn_select_all: 'All',
+    btn_select_none: 'None',
+    btn_drop_icons: 'Drop icons',
+    hint_img_picker: 'Click thumbnail to toggle upload; tiny or broken images auto-deselected',
+    msg_img_count: (sel, total) => `${sel} / ${total} selected`,
+    label_featured_short: 'Featured',
+    msg_progress_upload: (i, n) => `Uploading image ${i} / ${n}…`,
+    msg_progress_create: 'Creating draft…',
     label_include_source: 'Append source URL to post',
     hint_include_source: 'Adds a source link block at the end of the post when enabled',
     label_strip_params: 'Remove URL query parameters',
@@ -283,7 +301,9 @@ function applyTranslations() {
     testAiBtn: 'btn_test_ai', fbExpandBtn: 'btn_fb_expand',
     clipBtn: 'btn_clip', copyBtn: 'btn_copy', copyTextBtn: 'btn_copy_text',
     aiCleanBtn: 'btn_ai_clean',
-    plurkExpandBtn: 'btn_plurk_expand'
+    plurkExpandBtn: 'btn_plurk_expand',
+    imgSelectAll: 'btn_select_all', imgSelectNone: 'btn_select_none',
+    imgDropIcons: 'btn_drop_icons'
   };
   for (const [id, key] of Object.entries(btnMap)) {
     const el = document.getElementById(id);
@@ -311,6 +331,17 @@ document.getElementById('versionBadge').textContent = `v${_ver}`;
 
 let extractedData = null;
 let aiCleaned     = false;
+
+// Image picker state: Map<url, boolean> — true = selected for upload
+let imgSelection  = null;
+const SMALL_IMG_THRESHOLD_PX = 120;
+
+// Long-lived port that keeps the MV3 service worker alive while popup is open.
+let _keepAlivePort = null;
+try {
+  _keepAlivePort = chrome.runtime.connect({ name: 'wpClipperKeepAlive' });
+  _keepAlivePort.onDisconnect.addListener(() => { _keepAlivePort = null; });
+} catch (_) { /* SW unavailable */ }
 
 // --- DOM refs (WP settings) ---
 const settingsToggle      = document.getElementById('settingsToggle');
@@ -506,6 +537,8 @@ async function init() {
       copyTextBtn.disabled = false;
       if (hasConfig)           clipBtn.disabled    = false;
       if (aiCfg.aiApiKey)      aiCleanBtn.disabled = false;
+
+      buildImagePicker();
     } else {
       pageTitle.textContent = tab.title || t('msg_cannot_parse');
     }
@@ -551,6 +584,62 @@ stripUrlParamsChk.addEventListener('change', () => {
 // --- Preview toggle ---
 showPreviewChk.addEventListener('change', () => {
   previewImg.classList.toggle('visible', showPreviewChk.checked);
+});
+
+// --- "Use selection" rebuilds picker (different image set under selection) ---
+useSelectionChk?.addEventListener('change', () => {
+  // Reset selection map so newly-visible images default to selected
+  imgSelection = null;
+  buildImagePicker();
+});
+
+// --- Image picker: select all / none ---
+document.getElementById('imgSelectAll')?.addEventListener('click', () => {
+  if (!imgSelection) return;
+  imgSelection.forEach((_, k) => imgSelection.set(k, true));
+  document.querySelectorAll('#imgPickerGrid .img-tile').forEach(tile => {
+    tile.dataset.userToggled = '1';
+    tile.classList.add('selected');
+  });
+  updatePickerCount();
+});
+document.getElementById('imgSelectNone')?.addEventListener('click', () => {
+  if (!imgSelection) return;
+  imgSelection.forEach((_, k) => imgSelection.set(k, false));
+  document.querySelectorAll('#imgPickerGrid .img-tile').forEach(tile => {
+    tile.dataset.userToggled = '1';
+    tile.classList.remove('selected');
+  });
+  updatePickerCount();
+});
+
+// Drop "icon-ish" images: small dimensions, extreme aspect ratios, or
+// failed-to-load. Featured image is preserved (it's the og:image).
+const DROP_MIN_SIDE_PX = 150;     // either width or height below this → icon-ish
+const DROP_MAX_AR      = 6;       // aspect ratio (or its inverse) above this → spacer/banner
+document.getElementById('imgDropIcons')?.addEventListener('click', () => {
+  if (!imgSelection) return;
+  let dropped = 0;
+  document.querySelectorAll('#imgPickerGrid .img-tile').forEach(tile => {
+    if (tile.dataset.featured === '1') return;
+    const key = tile.dataset.key;
+    if (!key) return;
+    const img = tile.querySelector('img');
+    const w = img?.naturalWidth || 0;
+    const h = img?.naturalHeight || 0;
+    const broken = tile.classList.contains('broken');
+    const tooSmall = (w > 0 && h > 0) && (w < DROP_MIN_SIDE_PX || h < DROP_MIN_SIDE_PX);
+    const extremeAR = (w > 0 && h > 0) && (w / h > DROP_MAX_AR || h / w > DROP_MAX_AR);
+    if (broken || tooSmall || extremeAR) {
+      if (imgSelection.get(key) !== false) {
+        imgSelection.set(key, false);
+        tile.classList.remove('selected');
+        dropped++;
+      }
+      tile.dataset.userToggled = '1';
+    }
+  });
+  updatePickerCount();
 });
 
 // --- Fetch external image → base64 data URL (for Word-compatible clipboard) ---
@@ -658,6 +747,8 @@ fbExpandBtn.addEventListener('click', async () => {
       postExcerpt.value = extractedData.excerpt  || postExcerpt.value;
       const count = extractedData.comments?.length ?? 0;
       showStatus(fbExpandStatus, 'success', t('msg_fb_done', count));
+      imgSelection = null;
+      buildImagePicker();
     }
   } catch (e) {
     showStatus(fbExpandStatus, 'error', `${t('msg_fb_fail')}${escHtml(e.message)}`);
@@ -854,6 +945,8 @@ threadsExpandBtn.addEventListener('click', async () => {
       postTitle.value   = extractedData.title   || postTitle.value;
       postExcerpt.value = extractedData.excerpt || postExcerpt.value;
       pageTitle.textContent = extractedData.title || t('msg_no_title');
+      imgSelection = null;
+      buildImagePicker();
     }
   } catch (e) {
     showStatus(threadsExpandStatus, 'error', escHtml(e.message || t('msg_threads_load_fail')));
@@ -882,6 +975,8 @@ plurkExpandBtn.addEventListener('click', async () => {
       postExcerpt.value = extractedData.excerpt || postExcerpt.value;
       const pd = extractedData.plurkData;
       plurkInfo.textContent = t('msg_plurk_responses', pd.loadedCount, pd.responseCount);
+      imgSelection = null;
+      buildImagePicker();
       showStatus(plurkExpandStatus, 'success',
         t('msg_plurk_expanded', pd.loadedCount, pd.responseCount));
     }
@@ -949,6 +1044,9 @@ aiCleanBtn.addEventListener('click', async () => {
       extractedData.content = cleaned;
     }
     aiCleaned = true;
+    // AI may have removed images — rebuild picker from new image set.
+    imgSelection = null;
+    buildImagePicker();
     showStatus(aiCleanStatus, 'success', t('msg_ai_done'));
     aiCleanBtn.textContent = t('msg_ai_cleaned');
     clipBtn.textContent    = t('btn_clip_ai');
@@ -1070,7 +1168,10 @@ clipBtn.addEventListener('click', async () => {
     return;
   }
 
-  const content = effectiveContent();
+  // Apply image-picker selection: drop unselected <img> from content,
+  // and clear featuredImageUrl if user unselected it.
+  const content = applyImageSelectionToHtml(effectiveContent());
+  const featuredImageUrl = getSelectedFeaturedImageUrl();
 
   // Warn if uploading inline images and count is high
   if (cfg.uploadInlineImages !== false) {
@@ -1083,7 +1184,8 @@ clipBtn.addEventListener('click', async () => {
   const sendData = Object.assign({}, extractedData, {
     title:   postTitle.value.trim() || extractedData.title,
     excerpt: postExcerpt.value.trim(),
-    content
+    content,
+    featuredImageUrl
   });
 
   clipBtn.disabled = true;
@@ -1250,6 +1352,205 @@ function effectiveContent() {
     return extractedData.selectedHtml;
   }
   return extractedData.content;
+}
+
+// ── Image picker ─────────────────────────────────────────────────────────────
+
+// Group key for an image URL. Two URLs share a key iff they refer to the same
+// underlying file across CDN paths and query-string variations. Strategy:
+//  - If the path ends in a known image filename, use that filename.
+//    e.g. https://a.cdn/path/photo.jpg?v=2  and  https://b.cdn/photo.jpg
+//    both collapse to "name:photo.jpg".
+//  - Otherwise fall back to host+path (drops query) — conservative.
+function imageDedupKey(url) {
+  try {
+    const u = new URL(url);
+    const seg = (u.pathname.split('/').pop() || '').toLowerCase();
+    if (seg && /\.(jpe?g|png|gif|webp|svg|bmp|avif)$/i.test(seg)) {
+      return `name:${seg}`;
+    }
+    return `path:${u.host}${u.pathname}`.toLowerCase();
+  } catch {
+    return `raw:${url}`;
+  }
+}
+
+// Returns [{ key, canonicalUrl, variantCount, isFeatured }] — featured first,
+// then unique inline images. variantCount tells the user how many URL forms
+// of this image existed (a dedup hint).
+function gatherCandidateImages() {
+  if (!extractedData) return [];
+  const groups = new Map(); // key -> { key, canonicalUrl, variantCount, isFeatured }
+
+  const addUrl = (url, isFeatured) => {
+    if (!url || !/^https?:\/\//i.test(url)) return;
+    const key = imageDedupKey(url);
+    const g = groups.get(key);
+    if (g) {
+      g.variantCount++;
+      if (isFeatured) g.isFeatured = true;
+    } else {
+      groups.set(key, { key, canonicalUrl: url, variantCount: 1, isFeatured: !!isFeatured });
+    }
+  };
+
+  if (extractedData.featuredImageUrl) {
+    addUrl(extractedData.featuredImageUrl, true);
+  }
+  const html = effectiveContent() || '';
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('img[src]').forEach(img => {
+    addUrl(img.getAttribute('src'), false);
+  });
+
+  // Featured first; preserve insertion order for the rest.
+  const list = Array.from(groups.values());
+  list.sort((a, b) => (b.isFeatured ? 1 : 0) - (a.isFeatured ? 1 : 0));
+  return list;
+}
+
+function updatePickerCount() {
+  const el = document.getElementById('imgPickerCount');
+  if (!el || !imgSelection) return;
+  let total = 0, sel = 0;
+  imgSelection.forEach(v => { total++; if (v) sel++; });
+  el.textContent = t('msg_img_count', sel, total);
+}
+
+function buildImagePicker() {
+  const wrap = document.getElementById('imgPicker');
+  const grid = document.getElementById('imgPickerGrid');
+  if (!wrap || !grid) return;
+
+  const candidates = gatherCandidateImages();
+  if (candidates.length === 0) {
+    wrap.style.display = 'none';
+    imgSelection = null;
+    return;
+  }
+
+  // Initialize / merge selection map keyed by dedup key
+  if (!imgSelection) imgSelection = new Map();
+  candidates.forEach(c => {
+    if (!imgSelection.has(c.key)) imgSelection.set(c.key, true);
+  });
+  const candKeys = new Set(candidates.map(c => c.key));
+  Array.from(imgSelection.keys()).forEach(k => {
+    if (!candKeys.has(k)) imgSelection.delete(k);
+  });
+
+  grid.replaceChildren();
+  candidates.forEach(c => {
+    const tile = document.createElement('div');
+    tile.className = 'img-tile' + (c.isFeatured ? ' featured' : '');
+    tile.dataset.key = c.key;
+    if (c.isFeatured) tile.dataset.featured = '1';
+    if (imgSelection.get(c.key)) tile.classList.add('selected');
+
+    const img = document.createElement('img');
+    img.referrerPolicy = 'no-referrer';
+    img.src = c.canonicalUrl;
+
+    const meta = document.createElement('div');
+    meta.className = 'img-tile-meta';
+
+    const renderMeta = (extra) => {
+      const parts = [];
+      if (extra) parts.push(extra);
+      if (c.variantCount > 1) parts.push(`\u00d7${c.variantCount}`);
+      meta.textContent = parts.join(' ');
+    };
+
+    img.addEventListener('load', () => {
+      const w = img.naturalWidth || 0;
+      const h = img.naturalHeight || 0;
+      renderMeta((w && h) ? `${w}\u00d7${h}` : '');
+      // Auto-deselect tiny images on first load (only if user hasn't toggled)
+      if (!c.isFeatured && !tile.dataset.userToggled
+          && w > 0 && w < SMALL_IMG_THRESHOLD_PX
+          && imgSelection.get(c.key) === true) {
+        imgSelection.set(c.key, false);
+        tile.classList.remove('selected');
+        updatePickerCount();
+      }
+    });
+    img.addEventListener('error', () => {
+      tile.classList.add('broken');
+      renderMeta('\u26a0');
+      if (!tile.dataset.userToggled && imgSelection.get(c.key) === true) {
+        imgSelection.set(c.key, false);
+        tile.classList.remove('selected');
+        updatePickerCount();
+      }
+    });
+
+    tile.appendChild(img);
+
+    if (c.isFeatured) {
+      const lbl = document.createElement('div');
+      lbl.className = 'img-tile-label';
+      lbl.textContent = t('label_featured_short');
+      tile.appendChild(lbl);
+    }
+
+    const chk = document.createElement('div');
+    chk.className = 'img-tile-check';
+    chk.textContent = '\u2713';
+    tile.appendChild(chk);
+    tile.appendChild(meta);
+    renderMeta('');  // show ×N immediately even before image loads
+
+    tile.addEventListener('click', () => {
+      tile.dataset.userToggled = '1';
+      const next = !imgSelection.get(c.key);
+      imgSelection.set(c.key, next);
+      tile.classList.toggle('selected', next);
+      updatePickerCount();
+    });
+
+    grid.appendChild(tile);
+  });
+
+  wrap.style.display = 'block';
+  updatePickerCount();
+}
+
+// Strip <img> elements (and orphan <figure> wrappers) for two reasons:
+//  1. The image's dedup-key was unselected by the user.
+//  2. The image is a duplicate variant of an already-kept image (same key,
+//     different URL form). This keeps the final content's <img> count
+//     equal to the picker's selected-group count, instead of inflating
+//     it via thumbnail/CDN/cache-buster variants.
+function applyImageSelectionToHtml(html) {
+  if (!imgSelection) return html;
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const seenKeys = new Set();
+  doc.querySelectorAll('img[src]').forEach(img => {
+    const src = img.getAttribute('src');
+    if (!src) return;
+    const key = imageDedupKey(src);
+    const unselected = imgSelection.has(key) && imgSelection.get(key) === false;
+    const duplicate  = seenKeys.has(key);
+    if (unselected || duplicate) {
+      const fig = img.closest('figure');
+      if (fig && fig.querySelectorAll('img').length === 1 && !fig.querySelector('figcaption')) {
+        fig.remove();
+      } else {
+        img.remove();
+      }
+    } else {
+      seenKeys.add(key);
+    }
+  });
+  return doc.body.innerHTML;
+}
+
+function getSelectedFeaturedImageUrl() {
+  const fu = extractedData?.featuredImageUrl || '';
+  if (!fu) return '';
+  const key = imageDedupKey(fu);
+  if (imgSelection && imgSelection.get(key) === false) return '';
+  return fu;
 }
 
 function showStatus(el, type, html) {

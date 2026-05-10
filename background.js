@@ -17,6 +17,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+// Long-lived keepalive port from popup.js — keeps the MV3 service worker
+// alive while the popup is open, preventing the 30s idle eviction that can
+// kill in-flight uploads ("Receiving end does not exist").
+chrome.runtime.onConnect.addListener(port => {
+  if (port.name !== 'wpClipperKeepAlive') return;
+  port.onDisconnect.addListener(() => { /* popup closed; nothing to clean */ });
+});
+
+// Fetch with timeout via AbortController. Without this a single hung
+// image fetch could stall the worker until Chrome force-terminates it.
+async function fetchWithTimeout(url, options = {}, timeoutMs = 20000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: ctrl.signal });
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      throw new Error(`timeout after ${timeoutMs}ms: ${url}`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function cleanUrlParams(url, stripUrlParams, whitelist) {
   if (!stripUrlParams) return url;
   try {
@@ -61,13 +86,18 @@ async function handleSendToWordPress(payload) {
     'Content-Type': 'application/json'
   };
 
+  // Per-call in-memory dedup cache: same image hash looked up at most once.
+  // Useful when the same image appears multiple times or when this is a
+  // re-clip after AI cleaning. Keyed by SHA-256 slug.
+  const mediaCache = new Map();
+
   // 1. Upload featured image if available
   let featuredMediaId  = null;
   let featuredLocalUrl = null;
   if (articleData.featuredImageUrl) {
     try {
       const m = await uploadImageFromUrl(
-        base, headers, articleData.featuredImageUrl, articleData.title, articleData.url
+        base, headers, articleData.featuredImageUrl, articleData.title, articleData.url, mediaCache
       );
       featuredMediaId  = m.id;
       featuredLocalUrl = m.sourceUrl;
@@ -95,7 +125,7 @@ async function handleSendToWordPress(payload) {
         continue;
       }
       try {
-        const m = await uploadImageFromUrl(base, headers, src, '', articleData.url);
+        const m = await uploadImageFromUrl(base, headers, src, '', articleData.url, mediaCache);
         fullContent = fullContent.replaceAll(src, m.sourceUrl);
       } catch (e) {
         console.warn('Inline image upload failed:', src, e.message);
@@ -146,12 +176,18 @@ async function handleSendToWordPress(payload) {
   };
 }
 
-async function uploadImageFromUrl(base, headers, imageUrl, altText, articleUrl) {
+// Timeouts (ms) for the three network phases. Picked to keep total work
+// per image well under the SW idle limit even in pathological cases.
+const IMG_FETCH_TIMEOUT_MS    = 20000;
+const MEDIA_LOOKUP_TIMEOUT_MS = 10000;
+const MEDIA_UPLOAD_TIMEOUT_MS = 60000;
+
+async function uploadImageFromUrl(base, headers, imageUrl, altText, articleUrl, mediaCache) {
   // Fetch the image as blob，帶 referrer 以通過 hotlink 保護（如 udn.com）
-  const imgRes = await fetch(imageUrl, {
+  const imgRes = await fetchWithTimeout(imageUrl, {
     referrer: articleUrl || '',
     referrerPolicy: 'no-referrer-when-downgrade'
-  });
+  }, IMG_FETCH_TIMEOUT_MS);
   if (!imgRes.ok) throw new Error('Cannot fetch image');
 
   const blob = await imgRes.blob();
@@ -169,15 +205,20 @@ async function uploadImageFromUrl(base, headers, imageUrl, altText, articleUrl) 
   const slug = `clip-${hash}`;
   const filename = `${slug}.${ext}`;
 
+  // Per-call cache short-circuit (same image fetched twice in one clip)
+  if (mediaCache && mediaCache.has(slug)) {
+    return mediaCache.get(slug);
+  }
+
   // Look up by search (title/filename). WP's slug filter is unreliable for
   // attachments, but title defaults to the upload filename minus extension,
   // so searching for our deterministic slug almost always finds prior runs.
   try {
     const lookupUrl = `${base}/wp-json/wp/v2/media?search=${encodeURIComponent(slug)}&per_page=10&context=edit`;
-    const lookupRes = await fetch(lookupUrl, {
+    const lookupRes = await fetchWithTimeout(lookupUrl, {
       headers: { 'Authorization': headers['Authorization'] },
       credentials: 'omit'
-    });
+    }, MEDIA_LOOKUP_TIMEOUT_MS);
     if (lookupRes.ok) {
       const arr = await lookupRes.json();
       if (Array.isArray(arr)) {
@@ -191,7 +232,9 @@ async function uploadImageFromUrl(base, headers, imageUrl, altText, articleUrl) 
         });
         if (hit && hit.id) {
           console.log('[WP Clipper] Reusing existing media', hit.id, slug, hit.source_url);
-          return { id: hit.id, sourceUrl: hit.source_url };
+          const result = { id: hit.id, sourceUrl: hit.source_url };
+          if (mediaCache) mediaCache.set(slug, result);
+          return result;
         }
       }
     } else {
@@ -201,15 +244,7 @@ async function uploadImageFromUrl(base, headers, imageUrl, altText, articleUrl) 
     console.warn('[WP Clipper] Media dedup lookup failed, will upload:', e.message);
   }
 
-  const uploadHeaders = {
-    ...headers,
-    'Content-Type': contentType,
-    'Content-Disposition': `attachment; filename="${filename}"`
-  };
-  delete uploadHeaders['Content-Type']; // will be set by blob
-  uploadHeaders['Content-Type'] = contentType;
-
-  const uploadRes = await fetch(`${base}/wp-json/wp/v2/media`, {
+  const uploadRes = await fetchWithTimeout(`${base}/wp-json/wp/v2/media`, {
     method: 'POST',
     headers: {
       'Authorization': headers['Authorization'],
@@ -218,7 +253,7 @@ async function uploadImageFromUrl(base, headers, imageUrl, altText, articleUrl) 
     },
     credentials: 'omit',
     body: blob
-  });
+  }, MEDIA_UPLOAD_TIMEOUT_MS);
 
   if (!uploadRes.ok) {
     const errText = await uploadRes.text();
@@ -226,5 +261,7 @@ async function uploadImageFromUrl(base, headers, imageUrl, altText, articleUrl) 
   }
 
   const media = await uploadRes.json();
-  return { id: media.id, sourceUrl: media.source_url };
+  const result = { id: media.id, sourceUrl: media.source_url };
+  if (mediaCache) mediaCache.set(slug, result);
+  return result;
 }

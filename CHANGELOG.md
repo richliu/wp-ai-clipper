@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.3.0] - 2026-05-10
+### Added
+- **圖片選擇器（Image Picker）**：popup 顯示文章中所有圖片的縮圖網格，使用者可逐一勾選要上傳到 WordPress 媒體庫的圖片
+  - 主圖（featured）獨立成一格大尺寸顯示，內文圖片以 3 欄網格排列
+  - **依檔名去重**：同檔名的圖（不同 CDN、不同 query string、縮圖／原圖路徑差異）視為同一張，只在選擇器顯示一格；縮圖右下角顯示 `×N` 標記合併數；匯入時內容也只保留每組的第一個 `<img>`，避免 picker 顯示 13 但實際送出 23 張的不一致
+  - 寬度小於 120px 的圖會自動取消勾選（多半是 icon、間隔圖等）
+  - 載入失敗的圖會自動取消勾選並標記
+  - 提供「全選 / 全不選 / 去小圖」捷徑（去小圖：寬或高 < 150px、極端比例 1:6 以上、載入失敗者一鍵取消，主圖保留）
+  - 顯示每張圖實際尺寸（width × height）
+  - 在 AI 清理 / Facebook、Threads、Plurk 重新擷取後自動重建選單
+  - 解決過去抓到 30+ 張圖但實際只需要 6 張的場景（例：service.taipower.com.tw 等含側欄推薦圖、相同圖多重 CDN 變體的頁面）
+- **Service Worker keepalive port**：popup 開啟時透過 `chrome.runtime.connect({ name: 'wpClipperKeepAlive' })` 建立長連接，避免 MV3 的 30 秒閒置回收造成 `Receiving end does not exist` 錯誤
+- **背景 fetch 全面加上超時保護**：圖片下載 20s、媒體查詢 10s、媒體上傳 60s，使用 `AbortController`，避免單一卡住的請求拖死整個流程
+- **單次匯入內的媒體查詢快取**：相同 SHA-256 hash 的圖片在同一次匯入中只查 WordPress 一次
+
+### Fixed
+- 圖片很多的頁面（37+ 張）匯入失敗：`Could not establish connection. Receiving end does not exist.`
+  - 根因：每張圖序列化執行 `wp-json/wp/v2/media?search=` + 下載 + 上傳，總時間超過 30 秒導致 service worker 被回收，sendResponse 無對象可送達
+  - 修復：圖片選擇器讓使用者只上傳真正需要的圖；keepalive port 防回收；fetch 超時防卡死
+
+---
+
 ## [1.2.0] - 2026-05-01
 ### Added
 - **Threads 貼文支援**：`threads.com` / `threads.net` 單篇貼文頁面（`/@user/post/<id>`）專屬提取器

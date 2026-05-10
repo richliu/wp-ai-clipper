@@ -59,9 +59,10 @@ A handy tool for WordPress users who collect articles while browsing the web.
 2. (Optional) Select the text you want to clip
 3. Click the ✂ icon to open the popup
 4. Review and edit the title and excerpt if needed
-5. (Optional) Click **✦ AI Clean Content** to strip irrelevant content — wait until the button shows `[AI]`
-6. Click **✂ Import as Draft** to upload to WordPress
-7. Click the result link to jump directly to the WP editor
+5. **Image Picker**: the popup shows thumbnails of every image in the article. Click a thumbnail to toggle whether to upload it. Tiny images (<120px) and broken thumbnails are auto-deselected. Use **All / None** to toggle in bulk.
+6. (Optional) Click **✦ AI Clean Content** to strip irrelevant content — wait until the button shows `[AI]`
+7. Click **✂ Import as Draft** to upload to WordPress (only selected images are uploaded)
+8. Click the result link to jump directly to the WP editor
 
 ### Plurk Thread Backup
 1. Open the Plurk post page you want to back up (`plurk.com/p/xxxxxx`)
@@ -86,10 +87,12 @@ A handy tool for WordPress users who collect articles while browsing the web.
 - ✅ Article title
 - ✅ Body content (ads and navigation stripped)
 - ✅ Featured image (og:image) uploaded to Media Library
+- ✅ **Image Picker**: choose which images to upload; tiny (<120px) or broken images auto-deselected
 - ✅ All inline images automatically uploaded to Media Library and URLs replaced (can be disabled, on by default)
 - ✅ meta description used as excerpt
 - ✅ Original source URL appended to the post (can be disabled)
 - ✅ Selected text → import only the selection
+- ⚙️ Service Worker keepalive port + per-fetch timeouts so large image counts don't trigger 30s eviction
 - 📋 Status: Draft (requires manual review before publishing)
 
 ### AI Cleaning
