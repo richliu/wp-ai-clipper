@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1] - 2026-06-12
+### Fixed
+- Facebook 貼文模式無法在舊式 `facebook.com/story.php?story_fbid=…&id=…` 永久連結頁面啟用
+  - 根因：`FB_POST_RE` 僅匹配 `permalink.php`、`/posts/`、`groups/.../posts/`、`share/p/`，遺漏 FB 從早期沿用至今的 `story.php` 端點
+  - 修復：`popup.js` 與 `content.js` 的 `FB_POST_RE` 新增 `story.php` 分支；現在開啟 `https://www.facebook.com/story.php?story_fbid=...&id=...` 會自動進入 📘 Facebook 貼文模式並使用專屬擷取器
+
+---
+
 ## [1.3.0] - 2026-05-10
 ### Added
 - **圖片選擇器（Image Picker）**：popup 顯示文章中所有圖片的縮圖網格，使用者可逐一勾選要上傳到 WordPress 媒體庫的圖片

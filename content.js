@@ -149,7 +149,7 @@ function buildCleanHTML(el) {
 // ===== FACEBOOK SUPPORT =====================================
 
 // Matches Facebook post permalink URLs
-const FB_POST_RE = /^https?:\/\/(www\.|m\.)?facebook\.com\/([\w.%+-]+\/posts\/|permalink\.php|groups\/[^?#/]+\/posts\/|share\/p\/)/;
+const FB_POST_RE = /^https?:\/\/(www\.|m\.)?facebook\.com\/([\w.%+-]+\/posts\/|permalink\.php|story\.php|groups\/[^?#/]+\/posts\/|share\/p\/)/;
 
 function isFacebookPost() {
   return FB_POST_RE.test(window.location.href);
