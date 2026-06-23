@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.2] - 2026-06-23
+### Fixed
+- Facebook 貼文模式無法在 Facebook 社團 `multi_permalinks` 連結啟用
+  - 例：`https://www.facebook.com/groups/<gid>/?multi_permalinks=<pid>&hoisted_section_header_type=...`
+  - 根因：`FB_POST_RE` 對 groups 只匹配 `groups/<gid>/posts/<pid>` 路徑形式，未涵蓋以 query string 帶 `multi_permalinks=` 的社團貼文連結
+  - 修復：`popup.js` 與 `content.js` 的 `FB_POST_RE` 新增 `groups/<gid>/?multi_permalinks=...` 分支；現在這類連結會自動進入 📘 Facebook 貼文模式並使用專屬擷取器
+
+---
+
 ## [1.3.1] - 2026-06-12
 ### Fixed
 - Facebook 貼文模式無法在舊式 `facebook.com/story.php?story_fbid=…&id=…` 永久連結頁面啟用

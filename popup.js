@@ -434,7 +434,7 @@ function updateModelOptions(provider) {
   const cur = aiModelInput ? aiModelInput.value : '';
   sel.value = models.includes(cur) ? cur : '';
 }
-const FB_POST_RE      = /^https?:\/\/(www\.|m\.)?facebook\.com\/([\w.%+-]+\/posts\/|permalink\.php|story\.php|groups\/[^?#/]+\/posts\/|share\/p\/)/;
+const FB_POST_RE      = /^https?:\/\/(www\.|m\.)?facebook\.com\/([\w.%+-]+\/posts\/|permalink\.php|story\.php|groups\/[^?#/]+\/posts\/|groups\/[^?#/]+\/?\?[^#]*multi_permalinks=|share\/p\/)/;
 const PLURK_POST_RE   = /^https?:\/\/(www\.)?plurk\.com\/(p|m\/p)\/([a-zA-Z0-9]+)/;
 const THREADS_POST_RE = /^https?:\/\/(www\.)?(threads\.com|threads\.net)\/@([\w.]+)\/post\/([A-Za-z0-9_-]+)/;
 
