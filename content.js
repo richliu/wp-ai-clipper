@@ -413,6 +413,28 @@ function extractFbPost() {
     });
   }
 
+  // Supplement: post-ID-based image scan. On group "hoisted" posts (URL form
+  // /groups/<gid>/posts/<pid>/ or ?multi_permalinks=<pid>) FB renders the
+  // photo gallery as a sibling of the article, so the imgScope walk above
+  // misses them. Photo anchors carry `set=pcb.<postId>` which uniquely
+  // identifies the post's image collection — use that to pull missing imgs.
+  const idMatch = url.match(/\/posts\/(\d+)|\/permalink\/(\d+)|multi_permalinks=(\d+)|story_fbid=(\d+)/);
+  const postId = idMatch && (idMatch[1] || idMatch[2] || idMatch[3] || idMatch[4]);
+  if (postId) {
+    const seenSrcs = new Set(result.images.map(i => i.src));
+    document.querySelectorAll(`a[href*="pcb.${postId}"], a[href*="set=pcb.${postId}"]`).forEach(a => {
+      const img = a.querySelector('img');
+      if (!img) return;
+      const src = img.src || img.getAttribute('data-src') || '';
+      if (!src.startsWith('https://')) return;
+      if (src.includes('emoji') || src.includes('_s.') || src.includes('1x1')) return;
+      if (seenSrcs.has(src)) return;
+      seenSrcs.add(src);
+      if (!result.featuredImageUrl) result.featuredImageUrl = src;
+      result.images.push({ src, alt: img.alt || '' });
+    });
+  }
+
   // --- Comments ---
   const commentEls = Array.from(root.querySelectorAll('[role="article"]'))
     .filter(a => {

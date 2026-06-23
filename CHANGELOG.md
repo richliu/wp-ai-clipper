@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.3] - 2026-06-23
+### Fixed
+- Facebook 群組 hoisted 貼文（`/groups/<gid>/posts/<pid>/` 與 `?multi_permalinks=<pid>`）抓不到圖
+  - 根因：群組 hoisted post 把 photo gallery 渲染成 `[role="article"]` 的 sibling 而非 descendant，原本以 article 為 scope 的 `imgScope.querySelectorAll('img')` 完全掃不到
+  - 修復：在 `extractFbPost` 加 post-ID-based 補抓——從 URL 解出 post ID，掃 `a[href*="pcb.<postId>"]`（FB photo collection-by-post 的穩定識別字串）拿圖；完全 additive，不影響原本能正常運作的 permalink / story.php / 個人貼文等場景
+
+---
+
 ## [1.3.2] - 2026-06-23
 ### Fixed
 - Facebook 貼文模式無法在 Facebook 社團 `multi_permalinks` 連結啟用
