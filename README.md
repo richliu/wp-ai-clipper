@@ -120,7 +120,7 @@
 
 - `www.chinatimes.com` — 中時電子報
 - `udn.com` — 聯合新聞網
-- `facebook.com` — 臉書（預設保留留言；需點入單篇文章，從時間處按滑鼠中鍵另開分頁）
+- `facebook.com` — 臉書（預設保留留言；需點入單篇文章，從時間處按滑鼠中鍵另開分頁；多圖貼文「+N」隱藏的照片會自動開相片檢視器補抓）
 - `plurk.com/p/*` — Plurk 單噗頁面（備份模式）
 - `threads.com` / `threads.net` — Threads 單篇貼文（持續累積式擷取，可解析作者續串與所有留言）
 

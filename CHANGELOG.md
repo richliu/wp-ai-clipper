@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.3.4] - 2026-10-21
+### Fixed
+- Facebook 多圖貼文（縮圖顯示「+N」）只抓得到前 5 張，被「+N」蓋住的其餘照片存不下來
+  - 根因：FB 最多只渲染 5 格縮圖，其餘照片既不在 DOM 也不在頁面內嵌 JSON（`all_subattachments.nodes` 只帶可見的 5 張），只有打開相片檢視器才會載入
+  - 修復：新增 `collectFbOverflowPhotos()`——偵測「+N」縮圖後點開相片檢視器，以「下一張相片 / Next photo」逐張前進，收集 DOM 中沒有的照片原圖；繞回第一張即停止，再用檢視器自己的關閉鈕回到貼文（每次「下一張」都會 push history，不能用 `history.back()`）
+  - 結果依頁面 URL 快取，popup 多次重新擷取（展開留言、AI 整理前）不會重跑
+  - FB 擷取改為非同步；貼文圖片上限由 8 張提高到 40 張（可在圖片選擇器取消勾選）
+
+---
+
 ## [1.3.3] - 2026-06-23
 ### Fixed
 - Facebook 群組 hoisted 貼文（`/groups/<gid>/posts/<pid>/` 與 `?multi_permalinks=<pid>`）抓不到圖

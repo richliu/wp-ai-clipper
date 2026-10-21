@@ -189,7 +189,90 @@ function isFbProfileLink(href) {
   return href.startsWith('/') || href.includes('facebook.com/');
 }
 
-function extractFbPost() {
+// Multi-photo posts show at most 5 tiles; the last one carries a "+N" overlay
+// and the remaining photos are not in the DOM (nor in the embedded JSON).
+// Open the photo viewer from that tile, step through with "Next photo" and
+// collect the photos we don't already have, stop when the viewer wraps
+// around, then close it. Cached per page URL since the popup re-extracts
+// several times (after expanding comments, before AI rewrite, etc.).
+const _fbOverflowCache = new Map();
+
+function _fbPhotoParams(href) {
+  try {
+    const u = new URL(href, location.href);
+    return { fbid: u.searchParams.get('fbid'), set: u.searchParams.get('set') };
+  } catch (_) { return { fbid: null, set: null }; }
+}
+
+async function collectFbOverflowPhotos() {
+  const pageUrl = location.href;
+  if (_fbOverflowCache.has(pageUrl)) return _fbOverflowCache.get(pageUrl);
+
+  const overflowA = Array.from(document.querySelectorAll('a[href*="set=pcb."]'))
+    .find(a => /^\+\s*\d+$/.test(a.innerText?.trim() ?? '') && !a.closest('[role="article"][aria-label]'));
+  if (!overflowA) return [];
+
+  const setId = _fbPhotoParams(overflowA.getAttribute('href')).set;
+  const known = new Set(Array.from(document.querySelectorAll(`a[href*="set=${setId}"]`))
+    .map(a => _fbPhotoParams(a.getAttribute('href')).fbid).filter(Boolean));
+
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const curFbid = () => _fbPhotoParams(location.href).fbid;
+  const viewerImg = () => document.querySelector('img[data-visualcompletion="media-vc-image"]');
+  const NEXT_SEL = '[aria-label="下一張相片"], [aria-label="Next photo"], [aria-label="下一张照片"]';
+
+  const found = [];
+  const visited = new Set();
+  overflowA.click();
+
+  // Wait for the viewer to open
+  for (let t = 0; t < 40 && !(viewerImg() && curFbid()); t++) await sleep(150);
+
+  try {
+    const MAX_STEPS = 60;
+    let prevSrc = '';
+    for (let step = 0; step < MAX_STEPS; step++) {
+      const fbid = curFbid();
+      if (!fbid || visited.has(fbid)) break;  // wrapped around → done
+      visited.add(fbid);
+
+      // Wait for the image to actually swap to this photo
+      let img = viewerImg();
+      for (let t = 0; t < 30 && (!img || img.src === prevSrc || !img.complete); t++) {
+        await sleep(150);
+        img = viewerImg();
+      }
+      if (img && img.src !== prevSrc && img.src.startsWith('https://') && !known.has(fbid)) {
+        found.push({ src: img.src, alt: img.alt || '' });
+      }
+      prevSrc = img?.src ?? prevSrc;
+
+      const next = Array.from(document.querySelectorAll(NEXT_SEL)).find(e => e.offsetParent);
+      if (!next) break;
+      next.click();
+      for (let t = 0; t < 30 && curFbid() === fbid; t++) await sleep(150);
+    }
+  } finally {
+    // Close via the viewer's own close button; history.back() won't work
+    // because every "next" pushes a history entry.
+    const dlg = viewerImg()?.closest('[role="dialog"]');
+    const closeBtn = Array.from((dlg ?? document).querySelectorAll('[aria-label="關閉"], [aria-label="Close"], [aria-label="关闭"]'))
+      .find(e => e.offsetParent);
+    closeBtn?.click();
+    for (let t = 0; t < 20 && viewerImg(); t++) await sleep(150);
+  }
+
+  _fbOverflowCache.set(pageUrl, found);
+  return found;
+}
+
+async function extractFbPostWithOverflow() {
+  let extra = [];
+  try { extra = await collectFbOverflowPhotos(); } catch (_) {}
+  return extractFbPost(extra);
+}
+
+function extractFbPost(extraImages = []) {
   const url = window.location.href;
   const result = {
     url, platform: 'facebook', siteName: 'Facebook',
@@ -435,6 +518,17 @@ function extractFbPost() {
     });
   }
 
+  // Photos hidden behind the "+N" tile (collected from the photo viewer)
+  if (extraImages.length) {
+    const seenSrcs = new Set(result.images.map(i => i.src));
+    extraImages.forEach(img => {
+      if (seenSrcs.has(img.src)) return;
+      seenSrcs.add(img.src);
+      if (!result.featuredImageUrl) result.featuredImageUrl = img.src;
+      result.images.push(img);
+    });
+  }
+
   // --- Comments ---
   const commentEls = Array.from(root.querySelectorAll('[role="article"]'))
     .filter(a => {
@@ -460,8 +554,8 @@ function extractFbPost() {
     html += `<p>${fbEsc(line)}</p>\n`;
   });
 
-  // Post images (up to 8)
-  result.images.slice(0, 8).forEach(({ src, alt }) => {
+  // Post images (up to 40)
+  result.images.slice(0, 40).forEach(({ src, alt }) => {
     html += `<figure><img src="${src}" alt="${fbEsc(alt)}" style="max-width:100%;height:auto;"/></figure>\n`;
   });
 
@@ -1347,14 +1441,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       extractPlurkPost()
         .then(data => sendResponse({ success: true, data }))
         .catch(e   => sendResponse({ success: false, error: e.message }));
+    } else if (isFacebookPost()) {
+      extractFbPostWithOverflow()
+        .then(data => sendResponse({ success: true, data }))
+        .catch(e   => sendResponse({ success: false, error: e.message }));
     } else if (isThreadsPost()) {
       extractThreadsPost()
         .then(data => sendResponse({ success: true, data }))
         .catch(e   => sendResponse({ success: false, error: e.message }));
     } else {
       try {
-        const data = isFacebookPost()    ? extractFbPost()
-                  : isChinatimes()       ? extractChinatimes()
+        const data = isChinatimes()       ? extractChinatimes()
                   : isUdn()              ? extractUdn()
                   : extractContent();
         sendResponse({ success: true, data });
