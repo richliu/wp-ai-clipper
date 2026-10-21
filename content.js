@@ -164,7 +164,11 @@ async function expandFbComments() {
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const btns = [];
     document.querySelectorAll('[role="button"], [role="link"]').forEach(el => {
-      if (EXPAND_RE.test(el.innerText?.trim() || '')) btns.push(el);
+      if (!EXPAND_RE.test(el.innerText?.trim() || '')) return;
+      // Skip hidden copies (e.g. the feed rendered behind the post dialog);
+      // clicking them does nothing and they'd keep the loop spinning.
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) btns.push(el);
     });
     if (btns.length === 0) break;
     btns.forEach(btn => { try { btn.click(); } catch (_) {} });
@@ -533,7 +537,7 @@ function extractFbPost(extraImages = []) {
   const commentEls = Array.from(root.querySelectorAll('[role="article"]'))
     .filter(a => {
       const label = a.getAttribute('aria-label') ?? '';
-      return /的留言|'s comment/i.test(label);
+      return /的留言|的回覆|'s comment|'s reply/i.test(label);
     });
   result.comments = commentEls.map(extractFbComment).filter(Boolean);
 
@@ -563,9 +567,9 @@ function extractFbPost(extraImages = []) {
   if (result.comments.length > 0) {
     html += '\n<!-- wp:separator -->\n<hr class="wp-block-separator has-alpha-channel-opacity"/>\n<!-- /wp:separator -->\n';
     html += `\n<!-- wp:heading {"level":3} -->\n<h3>留言（${result.comments.length}）</h3>\n<!-- /wp:heading -->\n`;
-    result.comments.forEach(({ author, time, html: cHtml }) => {
+    result.comments.forEach(({ author, time, html: cHtml, isReply }) => {
       html += '<!-- wp:quote -->\n<blockquote class="wp-block-quote">\n';
-      html += `<p><strong>${fbEsc(author)}</strong>`;
+      html += `<p>${isReply ? '↳ ' : ''}<strong>${fbEsc(author)}</strong>`;
       if (time) html += ` · <small>${fbEsc(time)}</small>`;
       html += '</p>\n';
       if (cHtml) html += `<p>${cHtml}</p>\n`;
@@ -584,9 +588,14 @@ function extractFbPost(extraImages = []) {
 function extractFbComment(commentEl) {
   // --- Author + Time from aria-label (e.g. "封賢甯的留言4小時前") ---
   const ariaLabel = commentEl.getAttribute('aria-label') ?? '';
-  const labelMatch = ariaLabel.match(/^(.+?)(?:的留言|'s comment)\s*(.*)$/i);
+  const labelMatch = ariaLabel.match(/^(.+?)(?:的留言|的回覆|'s comment|'s reply)\s*(.*)$/i);
+  let isReply = /的回覆|'s reply/i.test(ariaLabel);
   let author = labelMatch?.[1]?.trim() ?? '';
   let time   = labelMatch?.[2]?.trim() ?? '';
+
+  // Replies are labelled "A回覆B的留言" / "Reply by A to B's comment"
+  const replyMatch = author.match(/^(.+?)回覆.+$/) ?? author.match(/^Reply by (.+?) to .+$/i);
+  if (replyMatch) { author = replyMatch[1].trim(); isReply = true; }
 
   // Fallback author: first <a href> with text
   if (!author) {
@@ -618,14 +627,20 @@ function extractFbComment(commentEl) {
     }
   });
 
-  // 3. Find comment text block (dir="auto")
-  const textEl = clone.querySelector('[dir="auto"]');
-  if (!textEl) {
+  // 3. Find comment text blocks: top-level [dir="auto"] that belong to this
+  //    comment (not a nested reply) and are not inside a link — the author
+  //    name and timestamp are also [dir="auto"], but wrapped in <a>.
+  const textEls = Array.from(clone.querySelectorAll('[dir="auto"]')).filter(d =>
+    d.closest('[role="article"]') === clone &&
+    !d.closest('a') &&
+    !d.parentElement?.closest('[dir="auto"]'));
+  if (textEls.length === 0) {
     const raw = commentEl.innerText?.trim() ?? '';
-    return (raw && raw !== author) ? { author, time, html: fbEsc(raw) } : null;
+    return (raw && raw !== author) ? { author, time, html: fbEsc(raw), isReply } : null;
   }
 
-  // 4. Serialize inline HTML — allow <a>, <b>, <i>, <em>, <strong>, <br>
+  // 4. Serialize inline HTML — allow <a>, <b>, <i>, <em>, <strong>, <br>;
+  //    block-level <div>s (one per paragraph in multi-line comments) → <br>
   const INLINE = new Set(['a', 'b', 'i', 'em', 'strong']);
   function ser(n) {
     if (n.nodeType === Node.TEXT_NODE) return fbEsc(n.textContent);
@@ -633,6 +648,7 @@ function extractFbComment(commentEl) {
     const tag = n.tagName.toLowerCase();
     if (tag === 'br') return '<br>';
     const inner = Array.from(n.childNodes).map(ser).join('');
+    if (tag === 'div' || tag === 'p') return inner ? inner + '<br>' : '';
     if (!INLINE.has(tag)) return inner;
     if (tag === 'a') {
       const href = n.getAttribute('href') ?? '';
@@ -642,10 +658,13 @@ function extractFbComment(commentEl) {
     return `<${tag}>${inner}</${tag}>`;
   }
 
-  const commentHtml = Array.from(textEl.childNodes).map(ser).join('').trim();
+  const commentHtml = textEls
+    .map(el => Array.from(el.childNodes).map(ser).join('').replace(/(<br>\s*)+$/, '').trim())
+    .filter(Boolean)
+    .join('<br>');
   if (!commentHtml && !author) return null;
 
-  return { author, time, html: commentHtml };
+  return { author, time, html: commentHtml, isReply };
 }
 
 // ===== UDN SUPPORT ==========================================
