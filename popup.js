@@ -100,6 +100,7 @@ const TRANSLATIONS = {
     msg_threads_expanding: '正在捲動載入回覆，請稍候…',
     msg_threads_expanded: (n) => `✓ 已載入 ${n} 則，重新擷取中…`,
     msg_threads_load_fail: '載入失敗',
+    msg_threads_partial: (n, total) => `只擷取到 ${n} / ${total} 則回覆，未載入的回覆（含照片）不會存到。請按「載入全部回覆」。`,
     // Plurk
     badge_plurk_mode: '🐧 Plurk 串備份模式',
     btn_plurk_expand: '↕ 展開全部回應',
@@ -224,6 +225,7 @@ const TRANSLATIONS = {
     msg_threads_expanding: 'Scrolling to load replies, please wait…',
     msg_threads_expanded: (n) => `✓ Loaded ${n} replies, re-extracting…`,
     msg_threads_load_fail: 'Load failed',
+    msg_threads_partial: (n, total) => `Only ${n} / ${total} replies captured; unloaded replies (and their photos) won't be saved. Click "Load All Replies".`,
     // Plurk
     badge_plurk_mode: '🐧 Plurk Thread Backup Mode',
     btn_plurk_expand: '↕ Expand All Responses',
@@ -522,6 +524,7 @@ async function init() {
         const pd = extractedData.plurkData;
         plurkInfo.textContent = t('msg_plurk_responses', pd.loadedCount, pd.responseCount);
       }
+      showThreadsPartialHint();
 
       if (extractedData.hasSelection) {
         useSelectionWrap.style.display = 'flex';
@@ -927,6 +930,16 @@ function plurkOpts() {
 
 
 // --- Threads: load all replies ---
+// Warn when far fewer replies were captured than the post's reply count.
+// Returns true if a warning was shown.
+function showThreadsPartialHint() {
+  const total = extractedData?.replyTotal;
+  const n = extractedData?.comments?.length ?? 0;
+  if (extractedData?.platform !== 'threads' || !total || n >= total * 0.9) return false;
+  showStatus(threadsExpandStatus, 'warn', escHtml(t('msg_threads_partial', n, total)));
+  return true;
+}
+
 threadsExpandBtn.addEventListener('click', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   threadsExpandBtn.disabled = true;
@@ -947,6 +960,7 @@ threadsExpandBtn.addEventListener('click', async () => {
       pageTitle.textContent = extractedData.title || t('msg_no_title');
       imgSelection = null;
       buildImagePicker();
+      showThreadsPartialHint();
     }
   } catch (e) {
     showStatus(threadsExpandStatus, 'error', escHtml(e.message || t('msg_threads_load_fail')));

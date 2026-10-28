@@ -1042,6 +1042,12 @@ function threadsEsc(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// Escape a text line and turn bare http(s) URLs into links
+function threadsLinkify(s) {
+  return threadsEsc(s).replace(/https?:\/\/[^\s<"]+/g,
+    u => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);
+}
+
 // ===== Threads capture helpers (module scope) ===============================
 // Threads (React Native Web) virtualises long lists: posts that scroll out of
 // view are unmounted from the DOM. A single point-in-time scan can therefore
@@ -1075,6 +1081,22 @@ function _threadsFindContainer(anchor, ownPostId) {
   return node;
 }
 
+// Reply-box placeholder ("回覆kengchuan_wu……" / "Reply to x…") and pin badge
+const THREADS_NOISE_RE = /^(回覆|Reply to\s*).+…+$|^(已釘選|Pinned)$|^\d[\d,.\s]*\s*(萬|億|[KMB])?$/i;
+
+// Replace an external link's (often truncated) text with its real URL,
+// unwrapping Threads' l.threads.com/?u= redirect.
+function _threadsExpandLinks(el) {
+  el.querySelectorAll('a[href]').forEach(a => {
+    let href = a.getAttribute('href') || '';
+    try {
+      const u = new URL(href, location.href);
+      if (u.hostname === 'l.threads.com' && u.searchParams.get('u')) href = u.searchParams.get('u');
+    } catch (_) {}
+    if (/^https?:\/\//.test(href)) a.textContent = ` ${href} `;
+  });
+}
+
 function _threadsExtractText(container) {
   const lines = [];
   const seen = new Set();
@@ -1083,11 +1105,28 @@ function _threadsExtractText(container) {
     if (!t || t.length <= 1) return;
     if (/^\d[\d,.\s]*[KMB]?$/i.test(t)) return;
     if (/^\d+\s*(分鐘|小時|天|週|個月|年|min|h|d|w|m|y)\s*前?$/i.test(t)) return;
-    if (THREADS_LABEL_RE.test(t)) return;
+    if (THREADS_LABEL_RE.test(t) || THREADS_NOISE_RE.test(t)) return;
     if (seen.has(t)) return;
     seen.add(t);
     lines.push(t);
   }
+
+  // Primary: post body is the outermost span[dir="auto"] that is not inside
+  // a link (author name), not a button (like/reply counters), not the reply
+  // box, and doesn't hold the <time> permalink.
+  const cands = Array.from(container.querySelectorAll('span[dir="auto"]')).filter(s =>
+    !s.closest('a') && !s.closest('[role="button"]') &&
+    !s.closest('[contenteditable], [role="textbox"]') && !s.querySelector('time'));
+  cands.filter(s => !cands.some(o => o !== s && o.contains(s))).forEach(s => {
+    const clone = s.cloneNode(true);
+    _threadsExpandLinks(clone);
+    clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+    const text = clone.textContent;  // clone is detached → no innerText layout
+    add(text.replace(/[ \t]+/g, ' ').replace(/\s*\d+\s*\/\s*\d+\s*$/, ''));  // drop "1/2" thread counter
+  });
+  if (lines.length) return lines.join('\n');
+
+  // Fallback: every leaf span (older layouts)
   for (const sp of container.querySelectorAll('span')) {
     if (sp.querySelector('span')) continue;
     add(sp.innerText || sp.textContent || '');
@@ -1131,9 +1170,13 @@ function _threadsExtractImages(container) {
 // even disappear). Returns the number of newly added posts.
 function _captureThreadsPosts(snapshot) {
   let added = 0;
+  // The conversation column is [role="region"]; the desktop "引用內容 / Quotes"
+  // sidebar sits outside it and must not be captured as replies.
+  const hasRegion = !!document.querySelector('[role="region"] a[href*="/post/"] time');
   for (const a of document.querySelectorAll('a[href*="/post/"]')) {
     const m = (a.getAttribute('href') || '').match(THREADS_PERMALINK_RE);
     if (!m) continue;
+    if (hasRegion && !a.closest('[role="region"]')) continue;
     const author = m[1];
     const postId = m[2];
     if (snapshot.has(postId)) continue;
@@ -1306,6 +1349,24 @@ async function extractThreadsPost() {
   const uniquePosts = ordered;
 
   result.comments = comments;
+
+  // Total reply count from the main post's reply button (svg labelled
+  // "回覆"/"Reply"), so the popup can warn when most replies — and their
+  // photos — haven't been loaded yet.
+  const mainAnchor = Array.from(document.querySelectorAll(`a[href*="/post/${mainCaptured.postId}"]`))
+    .find(a => a.querySelector('time[datetime]'));
+  if (mainAnchor) {
+    const box = _threadsFindContainer(mainAnchor, mainCaptured.postId);
+    const replyBtn = Array.from(box.querySelectorAll('[role="button"]')).find(b =>
+      Array.from(b.querySelectorAll('svg')).some(s =>
+        /^(回覆|Reply)$/i.test(s.getAttribute('aria-label') || s.querySelector('title')?.textContent || '')));
+    const m = (replyBtn?.innerText || '').trim().replace(/,/g, '').match(/^([\d.]+)\s*(萬|K|M)?$/i);
+    if (m) {
+      const mult = { '萬': 1e4, k: 1e3, m: 1e6 }[(m[2] || '').toLowerCase()] || 1;
+      result.replyTotal = Math.round(parseFloat(m[1]) * mult);
+    }
+  }
+
   const _mainAuthorIds = new Set([urlUsername, mainPost.author].filter(Boolean));
   result._diag = {
     totalPosts: uniquePosts.length,
@@ -1354,7 +1415,7 @@ async function extractThreadsPost() {
   if (header) html += wpParagraph(header);
 
   postText.split('\n').filter(l => l.trim()).forEach(line => {
-    html += wpParagraph(threadsEsc(line));
+    html += wpParagraph(threadsLinkify(line));
   });
 
   mainImages.forEach(({ src, alt }) => {
@@ -1373,7 +1434,7 @@ async function extractThreadsPost() {
       if (time) inner += ` · <small>${threadsEsc(time)}</small>`;
       inner += '</p>\n';
       text.split('\n').filter(l => l.trim()).forEach(line => {
-        inner += `<p>${threadsEsc(line)}</p>\n`;
+        inner += `<p>${threadsLinkify(line)}</p>\n`;
       });
       html += wpQuote(inner);
       imgs.forEach(({ src, alt }) => { html += wpImage(src, alt); });

@@ -122,7 +122,7 @@ The following sites use custom extractors that keep only the main article body:
 - `udn.com` — United Daily News
 - `facebook.com` — Facebook posts (comments are preserved by default; open individual posts by middle-clicking the timestamp; photos hidden behind a "+N" tile are collected automatically via the photo viewer; comments and replies are both kept, replies marked with ↳)
 - `plurk.com/p/*` — Plurk post pages (backup mode)
-- `threads.com` / `threads.net` — Threads single post pages (continuous accumulation, captures author continuations and all replies)
+- `threads.com` / `threads.net` — Threads single post pages (continuous accumulation, captures author continuations and all replies; for long threads click "Load All Replies" first, the popup shows captured / total replies)
 
 ---
 
