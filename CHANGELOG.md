@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.7] - 2026-10-28
+### Fixed
+- Facebook 社團 `/groups/<gid>/permalink/<pid>/` 連結抓不到圖片
+  - 根因：`FB_POST_RE` 對社團只認 `groups/<gid>/posts/<pid>` 形式，permalink 形式未進入 Facebook 貼文模式，改走一般新聞擷取器，抓不到 FB 圖片
+  - 修復：`content.js` 與 `popup.js` 的 `FB_POST_RE` 改為 `groups/<gid>/(posts|permalink)/`；既有的 post-ID（`pcb.<postId>`）補抓已支援 `/permalink/<id>`
+
+---
+
 ## [1.3.6] - 2026-10-28
 ### Fixed
 - Threads 貼文內文混入雜訊（帳號、日期、「已釘選」、按讚/瀏覽數、「熱門」、「查看動態」、回覆框 placeholder「回覆xxx……」、「作者」標籤、串文編號「1/2」）
