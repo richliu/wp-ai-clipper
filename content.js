@@ -825,6 +825,139 @@ function extractChinatimes() {
   return result;
 }
 
+// ===== DISP.CC (PTT mirror) SUPPORT =========================
+
+function isDispPtt() {
+  return /(^|\.)disp\.cc$/.test(window.location.hostname) &&
+    !!document.getElementById('tread-content');
+}
+
+// imgur thumbnails carry a size suffix (s/b/t/m/l/h) after the 5/7-char id;
+// strip it to back up the original image.
+function imgurOriginal(src) {
+  return src.replace(/^(https?:\/\/i\.imgur\.com\/[A-Za-z0-9]{7})[sbtmlh](\.\w+)$/, '$1$2');
+}
+
+// The article body is bare text nodes separated by <br> (BBS lines), with
+// imgur links each followed by a lazy-loaded <div><div class="img"><img data-src>
+// embed, then span.record footer lines and div.ptt-push-group for 推文.
+function extractDispPtt() {
+  const url = window.location.href;
+  const tc = document.getElementById('tread-content');
+  const result = {
+    url, siteName: 'PTT (Disp BBS)',
+    title: '', content: '', excerpt: '', featuredImageUrl: '', images: [], comments: []
+  };
+
+  const author = tc.querySelector('.TH_div .text-author')?.innerText.trim() || '';
+  const title  = tc.querySelector('.TH_div .text-title')?.innerText.trim() || '';
+  const time   = tc.querySelector('.TH_div .text-time')?.innerText.trim().replace(/\s+/g, ' ') || '';
+  result.title = title || document.title.replace(/\s+-\s+Disp BBS$/, '');
+
+  const esc = fbEsc;
+  const paras = [];       // finished blocks (HTML)
+  let lines = [];         // lines of the current paragraph
+  let line = '';
+  const records = [];
+  const textOnly = [];
+
+  const endLine = () => {
+    if (line.trim()) { lines.push(line); }
+    else if (lines.length) { paras.push(`<p>${lines.join('<br>')}</p>`); lines = []; }
+    line = '';
+  };
+  const flushPara = () => {
+    if (line.trim()) lines.push(line);
+    line = '';
+    if (lines.length) paras.push(`<p>${lines.join('<br>')}</p>`);
+    lines = [];
+  };
+  const nextNonBr = el => {
+    let n = el.nextElementSibling;
+    while (n && n.tagName === 'BR') n = n.nextElementSibling;
+    return n;
+  };
+
+  let started = !tc.querySelector('.TH_hr');  // body starts after the header rule
+  for (const node of tc.childNodes) {
+    if (!started) {
+      if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('TH_hr')) started = true;
+      continue;
+    }
+    if (node.nodeType === Node.TEXT_NODE) {
+      const t = node.textContent.replace(/\n/g, '');
+      line += esc(t);
+      if (t.trim()) textOnly.push(t.trim());
+      continue;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+    const el = node;
+    if (el.classList.contains('ptt-push-group') || el.classList.contains('re-group')) continue;
+    if (el.tagName === 'BR') { endLine(); continue; }
+    if (el.classList.contains('record')) {
+      flushPara();
+      const t = el.innerText.trim();
+      if (t) records.push(t);
+      continue;
+    }
+    if (el.tagName === 'A') {
+      // Image links are followed by their own embed — skip the bare URL
+      if (nextNonBr(el)?.querySelector?.('.img img')) continue;
+      const href = el.href;
+      line += `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(el.innerText.trim() || href)}</a>`;
+      continue;
+    }
+    const img = el.querySelector?.('.img img, img');
+    if (img) {
+      flushPara();
+      let src = img.dataset.src || img.getAttribute('src') || '';
+      try { src = new URL(src, location.href).href; } catch (_) {}
+      if (!src.startsWith('http')) continue;
+      src = imgurOriginal(src);
+      if (!result.featuredImageUrl) result.featuredImageUrl = src;
+      result.images.push({ src, alt: '' });
+      paras.push(`<figure><img src="${esc(src)}" alt="" style="max-width:100%;height:auto;"/></figure>`);
+      continue;
+    }
+    const t = el.innerText?.trim();
+    if (t) line += esc(t);
+  }
+  flushPara();
+
+  // --- 推文 ---
+  tc.querySelectorAll('.ptt-push-group .push_row').forEach(row => {
+    // span.fgW1 holds "推 author" — keep only the 推/噓/→ tag
+    const tag     = ((row.innerText || '').trim().match(/^(推|噓|→)/) || [])[1] || '';
+    const pAuthor = row.querySelector('.ptt-push-author')?.innerText.trim() || '';
+    const content = (row.querySelector('.ptt-push-content')?.innerText || '').replace(/^\s*:\s*/, '').trim();
+    const right   = row.querySelector('.push-right-ip')?.innerText.trim() || '';
+    // "1F 101.136.88.105 台灣 11/03 14:05" → keep floor + time, drop IP
+    const floor = (right.match(/^(\d+F)/) || [])[1] || '';
+    const ptime = (right.match(/(\d{1,2}\/\d{1,2}(?:\s+\d{1,2}:\d{2})?)\s*$/) || [])[1] || '';
+    if (pAuthor || content) result.comments.push({ tag, author: pAuthor, content, floor, time: ptime });
+  });
+
+  // --- Build HTML ---
+  let html = '';
+  const meta = [author && `作者：${esc(author)}`, time && `時間：${esc(time)}`].filter(Boolean);
+  if (meta.length) html += `<p>${meta.join('<br>')}</p>\n`;
+  html += paras.join('\n') + '\n';
+  if (records.length) html += `<p><small>${records.map(esc).join('<br>')}</small></p>\n`;
+
+  if (result.comments.length) {
+    html += '\n<!-- wp:separator -->\n<hr class="wp-block-separator has-alpha-channel-opacity"/>\n<!-- /wp:separator -->\n';
+    html += `\n<!-- wp:heading {"level":3} -->\n<h3>推文（${result.comments.length}）</h3>\n<!-- /wp:heading -->\n`;
+    html += '<p>' + result.comments.map(c =>
+      `${esc(c.tag)} <strong>${esc(c.author)}</strong>: ${esc(c.content)}` +
+      (c.floor || c.time ? ` <small>${esc([c.floor, c.time].filter(Boolean).join(' '))}</small>` : '')
+    ).join('<br>\n') + '</p>\n';
+  }
+
+  result.content = html;
+  result.excerpt = textOnly.join(' ').slice(0, 200);
+  return result;
+}
+
 // ===== PLURK SUPPORT ========================================
 
 const PLURK_POST_RE = /^https?:\/\/(www\.)?plurk\.com\/(p|m\/p)\/([a-zA-Z0-9]+)/;
@@ -1532,6 +1665,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     } else {
       try {
         const data = isChinatimes()       ? extractChinatimes()
+                  : isDispPtt()          ? extractDispPtt()
                   : isUdn()              ? extractUdn()
                   : extractContent();
         sendResponse({ success: true, data });

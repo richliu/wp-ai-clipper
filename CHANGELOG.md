@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.8] - 2026-10-31
+### Added
+- 支援 disp.cc 的 PTT 文章頁（`disp.cc/ptt/<board>/<id>`）
+  - 根因：disp.cc 內文是 `<br>` 分行的純文字節點，沒有 `<p>`/`<article>`，一般擷取器抓不到內文；圖片以 `data-src` lazy-load，未捲動前抓不到
+  - 修復：新增 `extractDispPtt()`，保留 BBS 分行與段落、讀 `data-src` 取全部圖片並轉為 imgur 原圖（去掉 `s/b/t/m/l/h` 縮圖後綴）、省略圖片上方重複的 imgur 連結、文末附 ※ 發信站／文章網址、推文以「推/→/噓 作者: 內容 樓層 時間」列出（不存 IP）
+
+---
+
 ## [1.3.7] - 2026-10-28
 ### Fixed
 - Facebook 社團 `/groups/<gid>/permalink/<pid>/` 連結抓不到圖片
