@@ -12,6 +12,8 @@ const TRANSLATIONS = {
     hint_app_password: '從 WordPress 後台 → 使用者 → 你的個人檔案 → Application Passwords 產生。<br><a id="wpAdminLink" href="#" target="_blank">直接前往 →</a>',
     label_upload_inline: '上傳內文圖片到媒體庫',
     hint_upload_inline: '將文章內所有圖片上傳至 WordPress 媒體庫並取代連結（超過 10 張時會提示確認）',
+    label_attach_media: '將上傳的圖片附加到文章',
+    hint_attach_media: '媒體庫的「上傳至」會顯示這篇文章；已附加到其他文章的圖片不會被改動',
     msg_many_images: count => `文章內有 ${count} 張圖片，確定要全部上傳到媒體庫嗎？`,
     label_img_picker: '圖片選擇',
     btn_select_all: '全選',
@@ -137,6 +139,8 @@ const TRANSLATIONS = {
     hint_app_password: 'Generate from WordPress Admin → Users → Your Profile → Application Passwords.<br><a id="wpAdminLink" href="#" target="_blank">Go there →</a>',
     label_upload_inline: 'Upload inline images to media library',
     hint_upload_inline: 'Uploads all images in the article to WordPress media library and replaces URLs (warns if more than 10)',
+    label_attach_media: 'Attach uploaded images to the post',
+    hint_attach_media: 'The media library\'s "Uploaded to" shows this post; images already attached to another post are left alone',
     msg_many_images: count => `This article contains ${count} images. Upload all of them to the media library?`,
     label_img_picker: 'Image Selection',
     btn_select_all: 'All',
@@ -356,6 +360,7 @@ const wpUserInput         = document.getElementById('wpUser');
 const wpPassInput         = document.getElementById('wpPass');
 const uploadInlineImagesChk = document.getElementById('uploadInlineImages');
 const includeSourceUrlChk   = document.getElementById('includeSourceUrl');
+const attachMediaToPostChk  = document.getElementById('attachMediaToPost');
 const stripUrlParamsChk     = document.getElementById('stripUrlParams');
 const whitelistField      = document.getElementById('whitelistField');
 const urlParamWhitelist   = document.getElementById('urlParamWhitelist');
@@ -479,6 +484,7 @@ async function init() {
   }
   uploadInlineImagesChk.checked = cfg.uploadInlineImages !== false;
   includeSourceUrlChk.checked   = cfg.includeSourceUrl  !== false;
+  attachMediaToPostChk.checked  = cfg.attachMediaToPost !== false;
   stripUrlParamsChk.checked    = cfg.stripUrlParams !== false;
   urlParamWhitelist.value      = cfg.urlParamWhitelist || '';
   whitelistField.style.display = stripUrlParamsChk.checked ? '' : 'none';
@@ -1102,6 +1108,7 @@ saveBtn.addEventListener('click', async () => {
     wpPass:            pass,
     uploadInlineImages: uploadInlineImagesChk.checked,
     includeSourceUrl:   includeSourceUrlChk.checked,
+    attachMediaToPost:  attachMediaToPostChk.checked,
     stripUrlParams:     stripUrlParamsChk.checked,
     urlParamWhitelist: urlParamWhitelist.value.trim(),
     uiLanguage:        document.getElementById('uiLanguage').value
@@ -1215,6 +1222,7 @@ clipBtn.addEventListener('click', async () => {
         appPassword:        cfg.wpPass,
         uploadInlineImages: cfg.uploadInlineImages !== false,
         includeSourceUrl:   cfg.includeSourceUrl  !== false,
+        attachMediaToPost:  cfg.attachMediaToPost !== false,
         stripUrlParams:     cfg.stripUrlParams    !== false,
         urlParamWhitelist:  cfg.urlParamWhitelist || '',
         articleData:        sendData
@@ -1245,6 +1253,7 @@ exportBtn.addEventListener('click', async () => {
     wpPass:            cfg.wpPass            || '',
     uploadInlineImages: cfg.uploadInlineImages !== false,
     includeSourceUrl:   cfg.includeSourceUrl  !== false,
+    attachMediaToPost:  cfg.attachMediaToPost !== false,
     stripUrlParams:     cfg.stripUrlParams    !== false,
     urlParamWhitelist:  cfg.urlParamWhitelist || '',
     uiLanguage:         cfg.uiLanguage        || 'auto',
@@ -1287,6 +1296,7 @@ importConfirmBtn.addEventListener('click', async () => {
       wpPass:            (data.wpPass || '').trim(),
       uploadInlineImages: data.uploadInlineImages !== false,
       includeSourceUrl:   data.includeSourceUrl  !== false,
+      attachMediaToPost:  data.attachMediaToPost !== false,
       stripUrlParams:     data.stripUrlParams    !== false,
       urlParamWhitelist:  (data.urlParamWhitelist || '').trim(),
       uiLanguage:         data.uiLanguage || 'auto'
@@ -1315,6 +1325,7 @@ importConfirmBtn.addEventListener('click', async () => {
     wpPassInput.value            = cleaned.wpPass;
     uploadInlineImagesChk.checked = cleaned.uploadInlineImages;
     includeSourceUrlChk.checked   = cleaned.includeSourceUrl;
+    attachMediaToPostChk.checked  = cleaned.attachMediaToPost;
     stripUrlParamsChk.checked    = cleaned.stripUrlParams;
     urlParamWhitelist.value      = cleaned.urlParamWhitelist;
     whitelistField.style.display = cleaned.stripUrlParams ? '' : 'none';
@@ -1343,7 +1354,7 @@ importConfirmBtn.addEventListener('click', async () => {
 // --- Helpers ---
 function loadConfig() {
   return new Promise(resolve => {
-    chrome.storage.local.get(['wpUrl', 'wpUser', 'wpPass', 'includeSourceUrl', 'stripUrlParams', 'urlParamWhitelist', 'uiLanguage'], resolve);
+    chrome.storage.local.get(['wpUrl', 'wpUser', 'wpPass', 'uploadInlineImages', 'includeSourceUrl', 'attachMediaToPost', 'stripUrlParams', 'urlParamWhitelist', 'uiLanguage'], resolve);
   });
 }
 

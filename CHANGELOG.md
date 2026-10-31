@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.9] - 2026-10-31
+### Changed
+- 獨立成行的圖片一律輸出為標準 `wp:image` 區塊
+  - 原因：各來源圖片混用無區塊註解的 `<figure>`、`wp:html`，且 `<img>` 帶 inline `style`；編輯器無法當圖片區塊編輯，前台也沒有 `srcset`
+  - 做法：`background.js` 上傳完成後以 `toImageBlocks()` 統一轉換；已上傳的圖帶 `"id"`、`size-full`、`wp-image-<id>`（前台自動產生 `srcset`/`sizes`），上傳失敗的圖輸出不帶 id 的 `wp:image`；移除 `style`；位於 quote/清單/`wp:html` 內或與文字同段的圖片保持原樣。精選圖區塊也改為 `wp:image`
+### Added
+- 設定「將上傳的圖片附加到文章」（預設開啟）：發文後將本次上傳的媒體 `post` 設為該文章，媒體庫「上傳至」可看到來源文章；已附加到其他文章的媒體不更動
+### Fixed
+- 「上傳內文圖片到媒體庫」關閉後仍會上傳：`loadConfig()` 未讀取 `uploadInlineImages`
+
+---
+
 ## [1.3.8] - 2026-10-31
 ### Added
 - 支援 disp.cc 的 PTT 文章頁（`disp.cc/ptt/<board>/<id>`）

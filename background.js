@@ -74,7 +74,7 @@ function extractImgSrcs(html) {
 }
 
 async function handleSendToWordPress(payload) {
-  const { wpUrl, username, appPassword, uploadInlineImages,
+  const { wpUrl, username, appPassword, uploadInlineImages, attachMediaToPost,
           includeSourceUrl, stripUrlParams, urlParamWhitelist, articleData } = payload;
 
   // Clean article URL before use
@@ -91,6 +91,11 @@ async function handleSendToWordPress(payload) {
   // re-clip after AI cleaning. Keyed by SHA-256 slug.
   const mediaCache = new Map();
 
+  // Uploaded media keyed by its WP source_url, so the image-block pass can
+  // add the attachment ID and the attach pass knows what to link.
+  const mediaByUrl = new Map();
+  const remember = m => { if (m && m.id && m.sourceUrl) mediaByUrl.set(m.sourceUrl, m); };
+
   // 1. Upload featured image if available
   let featuredMediaId  = null;
   let featuredLocalUrl = null;
@@ -101,6 +106,7 @@ async function handleSendToWordPress(payload) {
       );
       featuredMediaId  = m.id;
       featuredLocalUrl = m.sourceUrl;
+      remember(m);
     } catch (e) {
       console.warn('Featured image upload failed:', e.message);
     }
@@ -109,7 +115,7 @@ async function handleSendToWordPress(payload) {
   // 2. Build post content
   const featuredDisplayUrl = featuredLocalUrl || articleData.featuredImageUrl;
   const imageBlock = articleData.featuredImageUrl
-    ? `<!-- wp:html -->\n<figure><img src="${escHtml(featuredDisplayUrl)}" alt="${escHtml(articleData.title)}" style="max-width:100%;height:auto;" /></figure>\n<!-- /wp:html -->\n\n`
+    ? `<figure><img src="${escHtml(featuredDisplayUrl)}" alt="${escHtml(articleData.title)}"/></figure>\n\n`
     : '';
 
   let fullContent = imageBlock + articleData.content;
@@ -127,11 +133,15 @@ async function handleSendToWordPress(payload) {
       try {
         const m = await uploadImageFromUrl(base, headers, src, '', articleData.url, mediaCache);
         fullContent = fullContent.replaceAll(src, m.sourceUrl);
+        remember(m);
       } catch (e) {
         console.warn('Inline image upload failed:', src, e.message);
       }
     }
   }
+
+  // Standalone images → core/image blocks (with attachment ID when uploaded)
+  fullContent = toImageBlocks(fullContent, mediaByUrl);
 
   // Optionally append Reference URL as a separate block
   if (includeSourceUrl !== false) {
@@ -169,11 +179,64 @@ async function handleSendToWordPress(payload) {
   }
 
   const post = await postRes.json();
+
+  // Attach uploaded media to this post ("Uploaded to" in the media library).
+  // Media already attached elsewhere (dedup reuse) is left alone.
+  if (attachMediaToPost !== false) {
+    for (const m of mediaByUrl.values()) {
+      if (m.post) continue;
+      try {
+        const r = await fetchWithTimeout(`${base}/wp-json/wp/v2/media/${m.id}`, {
+          method: 'POST',
+          headers,
+          credentials: 'omit',
+          body: JSON.stringify({ post: post.id })
+        }, MEDIA_LOOKUP_TIMEOUT_MS);
+        if (!r.ok) console.warn('[WP Clipper] Attach media HTTP', r.status, m.id);
+        else m.post = post.id;
+      } catch (e) {
+        console.warn('[WP Clipper] Attach media failed:', m.id, e.message);
+      }
+    }
+  }
   return {
     postId: post.id,
     editUrl: `${base}/wp-admin/post.php?post=${post.id}&action=edit`,
     previewUrl: post.link
   };
+}
+
+// Rewrite each standalone image — a line holding just <figure><img></figure>,
+// optionally wrapped in a wp:html / wp:image block — as a core/image block.
+// Inline styles are dropped (they make the block invalid) and uploaded media
+// gets its attachment ID so WP renders srcset/sizes. Images nested in other
+// markup (<p>, <a>, lists, quotes, wp:html blocks) are left untouched.
+const STANDALONE_IMG_RE = /(^|\n)(?:<!-- wp:(?:html|image)(?: \{[^\n]*?\})? -->\n?)?<figure\b[^>]*>\s*(<img\b[^>]*>)\s*<\/figure>(?:\n?<!-- \/wp:(?:html|image) -->)?(?=\n|$)/g;
+const CONTAINER_TAGS = ['blockquote', 'ul', 'ol', 'table', 'div', 'details'];
+
+function isNested(html, offset) {
+  const before = html.slice(0, offset);
+  const count = re => (before.match(re) || []).length;
+  if (count(/<!-- wp:html\b/g) > count(/<!-- \/wp:html -->/g)) return true;
+  return CONTAINER_TAGS.some(t =>
+    count(new RegExp(`<${t}\\b`, 'gi')) > count(new RegExp(`</${t}>`, 'gi')));
+}
+
+function toImageBlocks(html, mediaByUrl) {
+  return html.replace(STANDALONE_IMG_RE, (whole, lead, img, offset) => {
+    if (isNested(html, offset + lead.length)) return whole;
+    const attr = name => (img.match(new RegExp(`\\s${name}="([^"]*)"`, 'i')) || [])[1] || '';
+    const src = attr('src');
+    if (!src) return whole;
+    const alt = attr('alt');
+    const m = mediaByUrl.get(src.replace(/&amp;/g, '&'));
+    if (m) {
+      return `${lead}<!-- wp:image {"id":${m.id},"sizeSlug":"full","linkDestination":"none"} -->\n` +
+        `<figure class="wp-block-image size-full"><img src="${src}" alt="${alt}" class="wp-image-${m.id}"/></figure>\n` +
+        `<!-- /wp:image -->`;
+    }
+    return `${lead}<!-- wp:image -->\n<figure class="wp-block-image"><img src="${src}" alt="${alt}"/></figure>\n<!-- /wp:image -->`;
+  });
 }
 
 // Timeouts (ms) for the three network phases. Picked to keep total work
@@ -232,7 +295,7 @@ async function uploadImageFromUrl(base, headers, imageUrl, altText, articleUrl, 
         });
         if (hit && hit.id) {
           console.log('[WP Clipper] Reusing existing media', hit.id, slug, hit.source_url);
-          const result = { id: hit.id, sourceUrl: hit.source_url };
+          const result = { id: hit.id, sourceUrl: hit.source_url, post: hit.post || 0 };
           if (mediaCache) mediaCache.set(slug, result);
           return result;
         }
@@ -261,7 +324,7 @@ async function uploadImageFromUrl(base, headers, imageUrl, altText, articleUrl, 
   }
 
   const media = await uploadRes.json();
-  const result = { id: media.id, sourceUrl: media.source_url };
+  const result = { id: media.id, sourceUrl: media.source_url, post: media.post || 0 };
   if (mediaCache) mediaCache.set(slug, result);
   return result;
 }

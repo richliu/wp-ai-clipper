@@ -89,6 +89,8 @@ A handy tool for WordPress users who collect articles while browsing the web.
 - ✅ Featured image (og:image) uploaded to Media Library
 - ✅ **Image Picker**: choose which images to upload; tiny (<120px) or broken images auto-deselected
 - ✅ All inline images automatically uploaded to Media Library and URLs replaced (can be disabled, on by default)
+- ✅ Images output as standard WordPress image blocks (`wp:image` with media ID, responsive on the front end)
+- ✅ Uploaded images attached to the post (can be disabled, on by default)
 - ✅ meta description used as excerpt
 - ✅ Original source URL appended to the post (can be disabled)
 - ✅ Selected text → import only the selection
