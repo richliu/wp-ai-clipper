@@ -220,6 +220,12 @@
       font-weight: normal; text-transform: none; letter-spacing: 0;
     }
     .toggle-row input[type="checkbox"] { cursor: pointer; accent-color: var(--accent); flex-shrink: 0; }
+    .threads-filter input[type="number"] {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--text);
+      padding: 3px 6px; font-size: 12px; outline: none;
+    }
+    .threads-filter input[type="number"]:focus { border-color: var(--accent); }
 
     /* Export / Import buttons side by side */
     .btn-row { display: flex; gap: 8px; }
@@ -570,6 +576,16 @@
     <div class="threads-badge" data-i18n="badge_threads_mode">🧵 Threads 貼文模式</div>
     <button class="btn btn-ghost" id="threadsExpandBtn" data-i18n="btn_threads_expand">↕ 載入全部回覆</button>
     <div class="status" id="threadsExpandStatus"></div>
+    <div class="plurk-options threads-filter" style="margin-top:10px">
+      <div class="hint" style="margin-top:0" data-i18n="label_threads_filter">熱門貼文（回覆數超過保留上限）篩選：</div>
+      <label class="toggle-row">
+        <span data-i18n="label_threads_min_chars">最少字數</span>
+        <input type="number" id="threadsMinChars" min="0" max="1000" step="10" style="width:64px" />
+        <span data-i18n="label_threads_max_replies">最多保留</span>
+        <input type="number" id="threadsMaxReplies" min="0" max="5000" step="50" style="width:72px" />
+      </label>
+      <div class="hint" style="margin-top:0" data-i18n="hint_threads_filter">作者回覆與附圖回覆不受字數限制；設為 0 表示不限制</div>
+    </div>
     <hr class="divider" style="margin-top:10px">
   </div>
 

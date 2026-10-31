@@ -1437,6 +1437,55 @@ function _installThreadsAutoCollector() {
   window.addEventListener('scroll', schedule, { passive: true });
 }
 
+// Total reply count from the post's reply button (svg labelled "回覆"/"Reply").
+function _threadsReplyTotal(postId) {
+  const anchor = Array.from(document.querySelectorAll(`a[href*="/post/${postId}"]`))
+    .find(a => a.querySelector('time[datetime]'));
+  if (!anchor) return 0;
+  const box = _threadsFindContainer(anchor, postId);
+  const replyBtn = Array.from(box.querySelectorAll('[role="button"]')).find(b =>
+    Array.from(b.querySelectorAll('svg')).some(s =>
+      /^(回覆|Reply)$/i.test(s.getAttribute('aria-label') || s.querySelector('title')?.textContent || '')));
+  const m = (replyBtn?.innerText || '').trim().replace(/,/g, '').match(/^([\d.]+)\s*(萬|K|M)?$/i);
+  if (!m) return 0;
+  const mult = { '萬': 1e4, k: 1e3, m: 1e6 }[(m[2] || '').toLowerCase()] || 1;
+  return Math.round(parseFloat(m[1]) * mult);
+}
+
+// Popular-post reply filter. Only applies when the post has more replies than
+// maxReplies: replies shorter than minChars are dropped (the author's own
+// replies and replies with images are always kept), and at most maxReplies
+// are kept in page order. 0 disables either limit. Set in the popup.
+const THREADS_FILTER_DEFAULTS = { threadsMinChars: 40, threadsMaxReplies: 70 };
+
+async function _threadsFilterOpts() {
+  let o = {};
+  try { o = await chrome.storage.local.get(Object.keys(THREADS_FILTER_DEFAULTS)); } catch (_) {}
+  const num = (v, d) => (Number.isFinite(Number(v)) && v !== '' && v != null ? Math.max(0, Math.floor(Number(v))) : d);
+  return {
+    minChars:   num(o.threadsMinChars,   THREADS_FILTER_DEFAULTS.threadsMinChars),
+    maxReplies: num(o.threadsMaxReplies, THREADS_FILTER_DEFAULTS.threadsMaxReplies)
+  };
+}
+
+// Characters that carry content: no URLs, @mentions, emoji or whitespace.
+function _threadsCharCount(text) {
+  return (text || '')
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/@[\w.]+/g, '')
+    .replace(/[\p{Extended_Pictographic}\u200d\ufe0f\s]/gu, '')
+    .length;
+}
+
+function _threadsIsPopular(total, opts) {
+  return opts.maxReplies > 0 && total > opts.maxReplies;
+}
+
+function _threadsKeepReply(p, ownerIds, opts) {
+  return ownerIds.has(p.author) || (p.imgs && p.imgs.length > 0) ||
+    _threadsCharCount(p.text) >= opts.minChars;
+}
+
 // Try to install immediately, and again on DOMContentLoaded if body isn't ready.
 try { _installThreadsAutoCollector(); } catch (_) {}
 if (document.readyState === 'loading') {
@@ -1539,35 +1588,34 @@ async function extractThreadsPost() {
   }
 
   // --- Replies ---
-  const comments = otherCaptured.map(p => {
+  // Re-alias to keep downstream HTML-build code untouched
+  const mainPost = mainCaptured;
+  const uniquePosts = ordered;
+  const _mainAuthorIds = new Set([urlUsername, mainPost.author].filter(Boolean));
+
+  // Total reply count from the main post's reply button, so the popup can
+  // warn when most replies — and their photos — haven't been loaded yet.
+  const replyTotal = _threadsReplyTotal(mainCaptured.postId);
+  if (replyTotal) result.replyTotal = replyTotal;
+
+  // Popular posts: keep only substantive replies, up to the configured cap
+  const filterOpts = await _threadsFilterOpts();
+  let kept = otherCaptured;
+  if (_threadsIsPopular(replyTotal || otherCaptured.length, filterOpts)) {
+    kept = otherCaptured.filter(p => _threadsKeepReply(p, _mainAuthorIds, filterOpts));
+    if (filterOpts.maxReplies) kept = kept.slice(0, filterOpts.maxReplies);
+    result.threadsFilter = {
+      minChars: filterOpts.minChars, maxReplies: filterOpts.maxReplies,
+      scanned: otherCaptured.length, kept: kept.length
+    };
+  }
+
+  const comments = kept.map(p => {
     const d = p.datetime ? new Date(p.datetime) : null;
     const time = (d && !isNaN(d)) ? d.toLocaleString('zh-TW') : '';
     return { author: p.author, time, text: p.text, imgs: p.imgs };
   });
-  // Re-alias to keep downstream HTML-build code untouched
-  const mainPost = mainCaptured;
-  const uniquePosts = ordered;
-
   result.comments = comments;
-
-  // Total reply count from the main post's reply button (svg labelled
-  // "回覆"/"Reply"), so the popup can warn when most replies — and their
-  // photos — haven't been loaded yet.
-  const mainAnchor = Array.from(document.querySelectorAll(`a[href*="/post/${mainCaptured.postId}"]`))
-    .find(a => a.querySelector('time[datetime]'));
-  if (mainAnchor) {
-    const box = _threadsFindContainer(mainAnchor, mainCaptured.postId);
-    const replyBtn = Array.from(box.querySelectorAll('[role="button"]')).find(b =>
-      Array.from(b.querySelectorAll('svg')).some(s =>
-        /^(回覆|Reply)$/i.test(s.getAttribute('aria-label') || s.querySelector('title')?.textContent || '')));
-    const m = (replyBtn?.innerText || '').trim().replace(/,/g, '').match(/^([\d.]+)\s*(萬|K|M)?$/i);
-    if (m) {
-      const mult = { '萬': 1e4, k: 1e3, m: 1e6 }[(m[2] || '').toLowerCase()] || 1;
-      result.replyTotal = Math.round(parseFloat(m[1]) * mult);
-    }
-  }
-
-  const _mainAuthorIds = new Set([urlUsername, mainPost.author].filter(Boolean));
   result._diag = {
     totalPosts: uniquePosts.length,
     comments: comments.length,
@@ -1627,6 +1675,13 @@ async function extractThreadsPost() {
   if (comments.length > 0) {
     html += wpSeparator();
     html += wpHeading(3, threadsEsc(`回覆與續串（${comments.length}）`));
+    const tf = result.threadsFilter;
+    if (tf) {
+      html += wpParagraph(`<small>${threadsEsc(
+        `熱門貼文：從已載入的 ${tf.scanned} 則回覆（共 ${replyTotal || '?'} 則）中，` +
+        `保留 ${tf.minChars} 字以上的回覆（作者回覆與附圖回覆不在此限）` +
+        (tf.maxReplies ? `，最多 ${tf.maxReplies} 則` : '') + '。')}</small>`);
+    }
     comments.forEach(({ author, time, text, imgs }) => {
       const isAuthor = _mainAuthorIds.has(author);
       const tag = isAuthor ? '【作者】' : '';
@@ -1663,10 +1718,25 @@ async function expandThreadsReplies() {
   const acc = _getThreadsAccumulator();
   _captureThreadsPosts(acc);
 
+  // Popular posts: stop once enough replies pass the filter instead of
+  // scrolling through thousands of them.
+  const urlMatch = window.location.href.match(THREADS_POST_RE);
+  const mainId = urlMatch?.[4] || '';
+  const ownerIds = new Set([urlMatch?.[3]].filter(Boolean));
+  const opts = await _threadsFilterOpts();
+  const popular = _threadsIsPopular(_threadsReplyTotal(mainId), opts);
+  const enoughKept = () => {
+    let n = 0;
+    for (const p of acc.values()) {
+      if (p.postId !== mainId && _threadsKeepReply(p, ownerIds, opts)) n++;
+    }
+    return n >= opts.maxReplies;
+  };
+
   const STEP = Math.max(Math.floor(window.innerHeight * 0.7), 400);
   const SETTLE_MS = 1200;
   const MAX_STUCK_AT_BOTTOM = 3;
-  const HARD_MAX_STEPS = 200; // safety: ~4 minutes max
+  const HARD_MAX_STEPS = popular ? 400 : 200; // safety: ~4 (popular: ~8) minutes max
 
   let stuckAtBottom = 0;
   let lastSize = acc.size;
@@ -1677,6 +1747,7 @@ async function expandThreadsReplies() {
     window.scrollBy(0, STEP);
     await new Promise(r => setTimeout(r, SETTLE_MS));
     _captureThreadsPosts(acc);
+    if (popular && enoughKept()) break;
 
     const atBottom =
       window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 50;

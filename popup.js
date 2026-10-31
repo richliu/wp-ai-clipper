@@ -103,6 +103,11 @@ const TRANSLATIONS = {
     msg_threads_expanded: (n) => `✓ 已載入 ${n} 則，重新擷取中…`,
     msg_threads_load_fail: '載入失敗',
     msg_threads_partial: (n, total) => `只擷取到 ${n} / ${total} 則回覆，未載入的回覆（含照片）不會存到。請按「載入全部回覆」。`,
+    msg_threads_filtered: (kept, scanned, total, max) => `熱門貼文：已載入 ${scanned} / ${total} 則，篩選後保留 ${kept} 則` + (kept < max ? `（未達 ${max} 則，可按「載入全部回覆」補足）` : ''),
+    label_threads_filter: '熱門貼文（回覆數超過保留上限）篩選：',
+    label_threads_min_chars: '最少字數',
+    label_threads_max_replies: '最多保留',
+    hint_threads_filter: '作者回覆與附圖回覆不受字數限制；設為 0 表示不限制',
     // Plurk
     badge_plurk_mode: '🐧 Plurk 串備份模式',
     btn_plurk_expand: '↕ 展開全部回應',
@@ -230,6 +235,11 @@ const TRANSLATIONS = {
     msg_threads_expanded: (n) => `✓ Loaded ${n} replies, re-extracting…`,
     msg_threads_load_fail: 'Load failed',
     msg_threads_partial: (n, total) => `Only ${n} / ${total} replies captured; unloaded replies (and their photos) won't be saved. Click "Load All Replies".`,
+    msg_threads_filtered: (kept, scanned, total, max) => `Popular post: loaded ${scanned} / ${total}, kept ${kept} after filtering` + (kept < max ? ` (below ${max}; click "Load All Replies" for more)` : ''),
+    label_threads_filter: 'Popular posts (more replies than the cap) filter:',
+    label_threads_min_chars: 'Min chars',
+    label_threads_max_replies: 'Keep at most',
+    hint_threads_filter: 'Author replies and replies with images ignore the length limit; 0 means no limit',
     // Plurk
     badge_plurk_mode: '🐧 Plurk Thread Backup Mode',
     btn_plurk_expand: '↕ Expand All Responses',
@@ -399,6 +409,8 @@ const fbExpandStatus = document.getElementById('fbExpandStatus');
 
 const threadsExpandBtn    = document.getElementById('threadsExpandBtn');
 const threadsExpandStatus = document.getElementById('threadsExpandStatus');
+const threadsMinCharsInput   = document.getElementById('threadsMinChars');
+const threadsMaxRepliesInput = document.getElementById('threadsMaxReplies');
 const useSelectionWrap  = document.getElementById('useSelectionWrap');
 const useSelectionChk   = document.getElementById('useSelection');
 const showPreviewChk    = document.getElementById('showPreview');
@@ -941,10 +953,47 @@ function plurkOpts() {
 function showThreadsPartialHint() {
   const total = extractedData?.replyTotal;
   const n = extractedData?.comments?.length ?? 0;
+  const tf = extractedData?.threadsFilter;
+  if (extractedData?.platform === 'threads' && tf) {
+    showStatus(threadsExpandStatus, tf.kept < tf.maxReplies ? 'warn' : 'success',
+      escHtml(t('msg_threads_filtered', tf.kept, tf.scanned, total || '?', tf.maxReplies || Infinity)));
+    return true;
+  }
   if (extractedData?.platform !== 'threads' || !total || n >= total * 0.9) return false;
   showStatus(threadsExpandStatus, 'warn', escHtml(t('msg_threads_partial', n, total)));
   return true;
 }
+
+// Popular-post filter thresholds (read by content.js from storage).
+// Changing one re-extracts so the draft reflects the new filter.
+chrome.storage.local.get(['threadsMinChars', 'threadsMaxReplies'], o => {
+  threadsMinCharsInput.value   = o.threadsMinChars   ?? 40;
+  threadsMaxRepliesInput.value = o.threadsMaxReplies ?? 70;
+});
+
+async function onThreadsFilterChange() {
+  const clamp = (el, d) => {
+    const v = Math.max(0, Math.floor(Number(el.value)));
+    el.value = Number.isFinite(v) ? v : d;
+    return Number(el.value);
+  };
+  await saveConfig({
+    threadsMinChars:   clamp(threadsMinCharsInput, 40),
+    threadsMaxReplies: clamp(threadsMaxRepliesInput, 70)
+  });
+  if (extractedData?.platform !== 'threads') return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const extracted = await sendToContent(tab.id, { action: 'extractContent' });
+  if (extracted?.success) {
+    extractedData = extracted.data;
+    imgSelection = null;
+    buildImagePicker();
+    clearStatus(threadsExpandStatus);
+    showThreadsPartialHint();
+  }
+}
+threadsMinCharsInput.addEventListener('change', onThreadsFilterChange);
+threadsMaxRepliesInput.addEventListener('change', onThreadsFilterChange);
 
 threadsExpandBtn.addEventListener('click', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
