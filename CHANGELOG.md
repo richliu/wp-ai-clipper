@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.10] - 2026-10-31
+### Added
+- Facebook 貼文影片支援
+  - `content.js`：以貼文內 `/videos/<id>` 連結找出影片（排除留言），從頁面內嵌 JSON 的 `progressive_urls` 取 MP4（優先 HD，否則 SD）與 `preferred_thumbnail` 縮圖；JSON 沒有時退回頁面 `<video>` 的 MP4 位址
+  - `background.js`：上傳 MP4 至媒體庫並輸出 `wp:video` 區塊（帶媒體 ID，會一併附加到文章）；HD 失敗改試 SD；超過 200MB、上傳失敗或關閉上傳時，改為「縮圖 + 原影片頁連結」（FB CDN 位址會過期，不保留）
+  - 影片下載／上傳逾時放寬為 3／5 分鐘
+
+---
+
 ## [1.3.9] - 2026-10-31
 ### Changed
 - 獨立成行的圖片一律輸出為標準 `wp:image` 區塊

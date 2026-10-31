@@ -118,12 +118,18 @@ async function handleSendToWordPress(payload) {
     ? `<figure><img src="${escHtml(featuredDisplayUrl)}" alt="${escHtml(articleData.title)}"/></figure>\n\n`
     : '';
 
-  let fullContent = imageBlock + articleData.content;
+  // Videos first: a video that can't be uploaded falls back to its thumbnail,
+  // which the inline-image pass below then uploads like any other image.
+  const articleContent = await processVideos(
+    base, headers, articleData.content, articleData.url, mediaCache, remember, uploadInlineImages !== false
+  );
+
+  let fullContent = imageBlock + articleContent;
 
   // 3. Upload inline images and replace URLs in content
   if (uploadInlineImages !== false) {
     // Collect all img srcs from the article content (not the imageBlock we just built)
-    const inlineSrcs = extractImgSrcs(articleData.content);
+    const inlineSrcs = extractImgSrcs(articleContent);
     for (const src of inlineSrcs) {
       // If this is the featured image already uploaded, just replace the URL
       if (src === articleData.featuredImageUrl && featuredLocalUrl) {
@@ -244,14 +250,61 @@ function toImageBlocks(html, mediaByUrl) {
 const IMG_FETCH_TIMEOUT_MS    = 20000;
 const MEDIA_LOOKUP_TIMEOUT_MS = 10000;
 const MEDIA_UPLOAD_TIMEOUT_MS = 60000;
+const IMAGE_LIMITS = { fetchMs: IMG_FETCH_TIMEOUT_MS, uploadMs: MEDIA_UPLOAD_TIMEOUT_MS, maxBytes: 0 };
+const VIDEO_LIMITS = { fetchMs: 180000, uploadMs: 300000, maxBytes: 200 * 1024 * 1024 };
 
-async function uploadImageFromUrl(base, headers, imageUrl, altText, articleUrl, mediaCache) {
+function decodeAttr(s) {
+  return String(s || '').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
+// Each <figure><video src data-sd poster data-page></video></figure> emitted by
+// an extractor becomes a core/video block pointing at the uploaded MP4 (HD,
+// then SD). If upload is off or fails, keep the thumbnail plus a link to the
+// original video page — the CDN URLs expire, so they're useless to keep.
+const VIDEO_FIG_RE = /<figure>\s*<video\b([^>]*)>\s*<\/video>\s*<\/figure>/g;
+
+async function processVideos(base, headers, html, articleUrl, mediaCache, remember, upload) {
+  for (const [whole, attrs] of [...html.matchAll(VIDEO_FIG_RE)]) {
+    const attr = name => decodeAttr((attrs.match(new RegExp(`\\s${name}="([^"]*)"`, 'i')) || [])[1]);
+    let m = null;
+    if (upload) {
+      for (const src of [attr('src'), attr('data-sd')].filter(Boolean)) {
+        try {
+          m = await uploadImageFromUrl(base, headers, src, '', articleUrl, mediaCache, VIDEO_LIMITS);
+          break;
+        } catch (e) {
+          console.warn('[WP Clipper] Video upload failed:', e.message);
+        }
+      }
+    }
+    let out;
+    if (m) {
+      remember(m);
+      out = `<!-- wp:video {"id":${m.id}} -->\n` +
+        `<figure class="wp-block-video"><video controls src="${escHtml(m.sourceUrl)}"></video></figure>\n` +
+        `<!-- /wp:video -->`;
+    } else {
+      const poster = attr('poster');
+      const page   = attr('data-page') || attr('src');
+      out = (poster ? `<figure><img src="${escHtml(poster)}" alt=""/></figure>\n` : '') +
+        `<p>🎬 <a href="${escHtml(page)}" target="_blank" rel="noopener">${escHtml(page)}</a></p>`;
+    }
+    html = html.replace(whole, () => out);
+  }
+  return html;
+}
+
+async function uploadImageFromUrl(base, headers, imageUrl, altText, articleUrl, mediaCache, limits = IMAGE_LIMITS) {
   // Fetch the image as blob，帶 referrer 以通過 hotlink 保護（如 udn.com）
   const imgRes = await fetchWithTimeout(imageUrl, {
     referrer: articleUrl || '',
     referrerPolicy: 'no-referrer-when-downgrade'
-  }, IMG_FETCH_TIMEOUT_MS);
+  }, limits.fetchMs);
   if (!imgRes.ok) throw new Error('Cannot fetch image');
+  const declared = Number(imgRes.headers.get('content-length')) || 0;
+  if (limits.maxBytes && declared > limits.maxBytes) {
+    throw new Error(`too large (${declared} bytes)`);
+  }
 
   const blob = await imgRes.blob();
   const contentType = blob.type || 'image/jpeg';
@@ -316,7 +369,7 @@ async function uploadImageFromUrl(base, headers, imageUrl, altText, articleUrl, 
     },
     credentials: 'omit',
     body: blob
-  }, MEDIA_UPLOAD_TIMEOUT_MS);
+  }, limits.uploadMs);
 
   if (!uploadRes.ok) {
     const errText = await uploadRes.text();

@@ -270,6 +270,36 @@ async function collectFbOverflowPhotos() {
   return found;
 }
 
+// FB embeds each video's progressive MP4 URLs (SD/HD) and thumbnail in the
+// page's JSON <script> blobs, keyed by video ID. Returns Map id → {hd, sd, thumb}.
+const FB_VIDEO_ID_RE = /\/videos\/(?:pcb\.\d+\/)?(\d+)/;
+function fbVideoSources() {
+  const map = new Map();
+  const add = (id, k, v) => {
+    if (!v) return;
+    const e = map.get(id) || {};
+    if (!e[k]) e[k] = v;
+    map.set(id, e);
+  };
+  const walk = o => {
+    if (!o || typeof o !== 'object') return;
+    if (Array.isArray(o)) { o.forEach(walk); return; }
+    if (o.id && Array.isArray(o.progressive_urls)) {
+      o.progressive_urls.forEach(p => {
+        const q = (p?.metadata?.quality || '').toLowerCase();
+        if (q === 'hd' || q === 'sd') add(o.id, q, p.progressive_url);
+      });
+    }
+    if (o.id && o.preferred_thumbnail?.image?.uri) add(o.id, 'thumb', o.preferred_thumbnail.image.uri);
+    for (const k in o) walk(o[k]);
+  };
+  document.querySelectorAll('script[type="application/json"]').forEach(s => {
+    if (!s.textContent.includes('progressive_url')) return;
+    try { walk(JSON.parse(s.textContent)); } catch (_) {}
+  });
+  return map;
+}
+
 async function extractFbPostWithOverflow() {
   let extra = [];
   try { extra = await collectFbOverflowPhotos(); } catch (_) {}
@@ -282,7 +312,7 @@ function extractFbPost(extraImages = []) {
     url, platform: 'facebook', siteName: 'Facebook',
     title: '', postAuthor: '', postTime: '',
     content: '', excerpt: '', featuredImageUrl: '',
-    images: [], comments: []
+    images: [], videos: [], comments: []
   };
 
   // Modern Facebook permalink pages render the post inside [role="dialog"].
@@ -533,6 +563,34 @@ function extractFbPost(extraImages = []) {
     });
   }
 
+  // --- Videos: each post video has a /videos/<id> link; resolve its MP4 ---
+  const videoSrcs = fbVideoSources();
+  const seenVideos = new Set();
+  imgScope.querySelectorAll('a[href*="/videos/"]').forEach(a => {
+    if (!notInCommentArticle(a)) return;
+    const href = a.getAttribute('href') ?? '';
+    const id = (href.match(FB_VIDEO_ID_RE) || [])[1];
+    if (!id || seenVideos.has(id)) return;
+    seenVideos.add(id);
+    const s = videoSrcs.get(id) || {};
+    let src = s.hd || s.sd || '';
+    if (!src) {
+      // Not in the embedded JSON (e.g. post opened from the feed): use the
+      // <video> rendered next to the link when it plays a plain MP4.
+      let el = a, video = null;
+      for (let i = 0; el && !video && i < 15; i++, el = el.parentElement) video = el.querySelector('video');
+      const vs = video?.currentSrc || '';
+      if (vs.startsWith('https://')) src = vs;
+    }
+    if (!src) return;
+    result.videos.push({
+      src,
+      sd: s.sd && s.sd !== src ? s.sd : '',
+      poster: s.thumb || '',
+      page: new URL(href, location.href).href.split('?')[0]
+    });
+  });
+
   // --- Comments ---
   const commentEls = Array.from(root.querySelectorAll('[role="article"]'))
     .filter(a => {
@@ -561,6 +619,15 @@ function extractFbPost(extraImages = []) {
   // Post images (up to 40)
   result.images.slice(0, 40).forEach(({ src, alt }) => {
     html += `<figure><img src="${src}" alt="${fbEsc(alt)}" style="max-width:100%;height:auto;"/></figure>\n`;
+  });
+
+  // Post videos — background.js uploads the MP4 and turns this into a
+  // core/video block, or falls back to the thumbnail + link to FB.
+  result.videos.forEach(({ src, sd, poster, page }) => {
+    html += `<figure><video controls src="${fbEsc(src)}"` +
+      (sd ? ` data-sd="${fbEsc(sd)}"` : '') +
+      (poster ? ` poster="${fbEsc(poster)}"` : '') +
+      ` data-page="${fbEsc(page)}"></video></figure>\n`;
   });
 
   // Comments section
