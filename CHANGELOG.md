@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.12] - 2026-11-02
+### Fixed
+- Facebook 社團貼文（`?multi_permalinks=`）內文與摘要抓到別篇
+  - 根因：FB 改版，內文標記由 `data-ad-preview="message"` 改為 `data-ad-rendering-role="story_message"`，找不到貼文對話框，退回整個社團頁面抓到動態上的其他貼文
+  - 修復：新增 `FB_CAPTION_SEL`，新舊標記都支援
+- Facebook 社團貼文作者被抓成社團名稱：優先讀對話框標題「X 的貼文」/ "X's post"
+- Facebook 留言的圖片沒有存到
+  - 根因：`extractFbComment` 只取文字，只含圖片的連結被當成大頭貼移除
+  - 修復：收集留言內寬度大於 48px 的 `<img>`（照片、GIF、貼圖），放在該則留言區塊下方並上傳；只有圖片的留言不再把作者與時間當內文。目前存頁面上的縮圖（約 260px）
+- 內文圖片下載網址含 `&amp;`：圖片選擇器重新序列化 HTML 後，`background.js` 直接以 `&amp;` 網址下載，帶簽章的網址可能失敗；改為下載前先解碼
+
+---
+
 ## [1.3.11] - 2026-10-31
 ### Added
 - Threads 熱門貼文回覆篩選（回覆總數超過「最多保留」時才啟用）

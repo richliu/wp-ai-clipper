@@ -131,13 +131,16 @@ async function handleSendToWordPress(payload) {
     // Collect all img srcs from the article content (not the imageBlock we just built)
     const inlineSrcs = extractImgSrcs(articleContent);
     for (const src of inlineSrcs) {
+      // src is the raw attribute value: the image picker re-serializes the
+      // HTML, turning & into &amp;. Decode to fetch, replace using the raw form.
+      const fetchUrl = decodeAttr(src);
       // If this is the featured image already uploaded, just replace the URL
-      if (src === articleData.featuredImageUrl && featuredLocalUrl) {
+      if (fetchUrl === articleData.featuredImageUrl && featuredLocalUrl) {
         fullContent = fullContent.replaceAll(src, featuredLocalUrl);
         continue;
       }
       try {
-        const m = await uploadImageFromUrl(base, headers, src, '', articleData.url, mediaCache);
+        const m = await uploadImageFromUrl(base, headers, fetchUrl, '', articleData.url, mediaCache);
         fullContent = fullContent.replaceAll(src, m.sourceUrl);
         remember(m);
       } catch (e) {

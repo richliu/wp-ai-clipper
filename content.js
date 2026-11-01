@@ -300,6 +300,11 @@ function fbVideoSources() {
   return map;
 }
 
+// Post caption markers. FB moved from data-ad-preview="message" to
+// data-ad-rendering-role="story_message" (2026-11); match all of them.
+const FB_CAPTION_SEL = '[data-ad-preview="message"], [data-ad-comet-preview="message"], ' +
+  '[data-ad-rendering-role="story_message"]';
+
 async function extractFbPostWithOverflow() {
   let extra = [];
   try { extra = await collectFbOverflowPhotos(); } catch (_) {}
@@ -318,7 +323,7 @@ function extractFbPost(extraImages = []) {
   // Modern Facebook permalink pages render the post inside [role="dialog"].
   // Fall back to [role="main"] for legacy/mobile layouts.
   const dialog = Array.from(document.querySelectorAll('[role="dialog"]'))
-    .find(d => d.querySelector('[data-ad-preview="message"], [data-ad-comet-preview="message"]'));
+    .find(d => d.querySelector(FB_CAPTION_SEL));
   const root = dialog ?? document.querySelector('[role="main"]');
   if (!root) { result.title = document.title; return result; }
 
@@ -354,6 +359,15 @@ function extractFbPost(extraImages = []) {
   const dashIdx = docTitle.indexOf(' - ');
   if (dashIdx > 0) {
     result.postAuthor = docTitle.slice(0, dashIdx).trim();
+  }
+
+  // Priority 1b: dialog heading "X 的貼文" / "X's post". Group pages title the
+  // tab with the group name, and their header links the group before the poster.
+  if (!result.postAuthor && dialog) {
+    const h = Array.from(dialog.querySelectorAll('h2'))
+      .map(e => (e.innerText || '').trim().match(/^(.+?)\s*的貼文$|^(.+?)'s post$/i))
+      .find(Boolean);
+    if (h) result.postAuthor = (h[1] || h[2]).trim();
   }
 
   // Helper: returns true if el is NOT inside a comment article.
@@ -458,7 +472,7 @@ function extractFbPost(extraImages = []) {
   let captionEl = null;
 
   // P1: caption directly in root (dialog layout has it outside any article)
-  captionEl = root.querySelector('[data-ad-preview="message"], [data-ad-comet-preview="message"]');
+  captionEl = root.querySelector(FB_CAPTION_SEL);
 
   // P2: match by document.title hint
   if (!captionEl) {
@@ -471,15 +485,14 @@ function extractFbPost(extraImages = []) {
       : '';
     if (titleContent.length > 10) {
       const hint = titleContent.slice(0, 30);
-      const allCaptions = Array.from(root.querySelectorAll('[data-ad-preview="message"], [data-ad-comet-preview="message"]'));
+      const allCaptions = Array.from(root.querySelectorAll(FB_CAPTION_SEL));
       captionEl = allCaptions.find(c => (c.innerText?.trim() ?? '').startsWith(hint));
     }
   }
 
   // P3: storyEl-based (static HTML / legacy)
   if (!captionEl && storyEl) {
-    captionEl = storyEl.querySelector('[data-ad-preview="message"]')
-      ?? storyEl.querySelector('[data-ad-comet-preview="message"]')
+    captionEl = storyEl.querySelector(FB_CAPTION_SEL)
       ?? storyEl;
   }
 
@@ -634,13 +647,17 @@ function extractFbPost(extraImages = []) {
   if (result.comments.length > 0) {
     html += '\n<!-- wp:separator -->\n<hr class="wp-block-separator has-alpha-channel-opacity"/>\n<!-- /wp:separator -->\n';
     html += `\n<!-- wp:heading {"level":3} -->\n<h3>留言（${result.comments.length}）</h3>\n<!-- /wp:heading -->\n`;
-    result.comments.forEach(({ author, time, html: cHtml, isReply }) => {
+    result.comments.forEach(({ author, time, html: cHtml, isReply, imgs }) => {
       html += '<!-- wp:quote -->\n<blockquote class="wp-block-quote">\n';
       html += `<p>${isReply ? '↳ ' : ''}<strong>${fbEsc(author)}</strong>`;
       if (time) html += ` · <small>${fbEsc(time)}</small>`;
       html += '</p>\n';
       if (cHtml) html += `<p>${cHtml}</p>\n`;
       html += '</blockquote>\n<!-- /wp:quote -->\n';
+      // Images go after the quote, like Plurk/Threads replies
+      imgs.forEach(({ src, alt }) => {
+        html += `<figure><img src="${src}" alt="${fbEsc(alt)}"/></figure>\n`;
+      });
     });
   }
 
@@ -679,6 +696,19 @@ function extractFbComment(commentEl) {
     }
   }
 
+  // --- Comment images ---
+  // Photos, GIFs and stickers. Avatars are SVG <image>, so only <img> counts;
+  // the size check skips inline emoji, the closest() check nested replies.
+  const imgs = [];
+  commentEl.querySelectorAll('img').forEach(img => {
+    if (img.closest('[role="article"]') !== commentEl) return;
+    const src = img.src || '';
+    if (!src.startsWith('https://') || imgs.some(i => i.src === src)) return;
+    if ((img.getBoundingClientRect().width || img.naturalWidth) <= 48) return;
+    if (isFbProfileLink(img.closest('a[href]')?.getAttribute('href') ?? '')) return;
+    imgs.push({ src, alt: img.alt || '' });
+  });
+
   // --- Comment HTML ---
   const clone = commentEl.cloneNode(true);
 
@@ -702,8 +732,9 @@ function extractFbComment(commentEl) {
     !d.closest('a') &&
     !d.parentElement?.closest('[dir="auto"]'));
   if (textEls.length === 0) {
+    if (imgs.length) return { author, time, html: '', isReply, imgs };  // image-only comment
     const raw = commentEl.innerText?.trim() ?? '';
-    return (raw && raw !== author) ? { author, time, html: fbEsc(raw), isReply } : null;
+    return (raw && raw !== author) ? { author, time, html: fbEsc(raw), isReply, imgs } : null;
   }
 
   // 4. Serialize inline HTML — allow <a>, <b>, <i>, <em>, <strong>, <br>;
@@ -731,7 +762,7 @@ function extractFbComment(commentEl) {
     .join('<br>');
   if (!commentHtml && !author) return null;
 
-  return { author, time, html: commentHtml, isReply };
+  return { author, time, html: commentHtml, isReply, imgs };
 }
 
 // ===== UDN SUPPORT ==========================================
