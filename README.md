@@ -89,7 +89,8 @@
 - ✅ 精選圖片（og:image）上傳到媒體庫
 - ✅ **圖片選擇器**：使用者勾選哪些圖要上傳；自動排除過小（<120px）或載入失敗的圖
 - ✅ 內文所有圖片自動上傳至媒體庫並取代連結（可關閉，預設開啟）
-- ✅ 圖片輸出為標準 WordPress 圖片區塊（`wp:image`，帶媒體 ID，前台自動 responsive）
+- ✅ 內文輸出為 WordPress 新式區塊（段落、標題、清單、引言、分隔線），編輯時不必切換 HTML 模式
+- ✅ 圖片輸出為標準 WordPress 圖片區塊（`wp:image`，帶媒體 ID 與圖說，前台自動 responsive）
 - ✅ 上傳的圖片附加到該篇文章（可關閉，預設開啟）
 - ✅ meta description 作為摘要
 - ✅ 原始來源 URL 附在文章末尾（可關閉）
@@ -126,6 +127,7 @@
 - `plurk.com/p/*` — Plurk 單噗頁面（備份模式）
 - `threads.com` / `threads.net` — Threads 單篇貼文（持續累積式擷取，可解析作者續串與所有留言；回覆多時請先按「載入全部回覆」，popup 會提示已擷取 / 總回覆數；熱門貼文（回覆數超過「最多保留」，預設 70）只保留 40 字以上的回覆，兩個門檻可在 popup 調整）
 - `disp.cc` — PTT 文章鏡像頁（內文、imgur 原圖、推文）
+- Elementor 建置的 WordPress 網站 — 只取文章本體（`[data-elementor-type="wp-post"]`），不含選單與側欄
 - `hackmd.io` — HackMD 筆記（內文、圖片，摘要取內文第一段）
 
 ---

@@ -41,6 +41,7 @@ function extractContent() {
     '.article-content',
     '.post-content',
     '.entry-content',
+    '[data-elementor-type="wp-post"]',
     '.markdown-body',
     '.story-body',
     '.news-content',
@@ -133,6 +134,8 @@ function buildCleanHTML(el) {
     if (node.nodeType !== Node.ELEMENT_NODE) return '';
 
     const tag = node.tagName.toLowerCase();
+
+    if (tag === 'br') return '<br>';
 
     if (!allowedTags.includes(tag)) {
       let inner = '';

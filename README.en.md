@@ -89,7 +89,8 @@ A handy tool for WordPress users who collect articles while browsing the web.
 - ✅ Featured image (og:image) uploaded to Media Library
 - ✅ **Image Picker**: choose which images to upload; tiny (<120px) or broken images auto-deselected
 - ✅ All inline images automatically uploaded to Media Library and URLs replaced (can be disabled, on by default)
-- ✅ Images output as standard WordPress image blocks (`wp:image` with media ID, responsive on the front end)
+- ✅ Content output as native WordPress blocks (paragraph, heading, list, quote, separator) — no need to switch to HTML mode to edit
+- ✅ Images output as standard WordPress image blocks (`wp:image` with media ID and caption, responsive on the front end)
 - ✅ Uploaded images attached to the post (can be disabled, on by default)
 - ✅ meta description used as excerpt
 - ✅ Original source URL appended to the post (can be disabled)
@@ -126,6 +127,7 @@ The following sites use custom extractors that keep only the main article body:
 - `plurk.com/p/*` — Plurk post pages (backup mode)
 - `threads.com` / `threads.net` — Threads single post pages (continuous accumulation, captures author continuations and all replies; for long threads click "Load All Replies" first, the popup shows captured / total replies; popular posts with more replies than "Keep at most" (default 70) keep only replies of 40+ characters, both thresholds adjustable in the popup)
 - `disp.cc` — PTT article mirror pages (body text, original imgur images, push comments)
+- Elementor-built WordPress sites — article body only (`[data-elementor-type="wp-post"]`), no menus or sidebars
 - `hackmd.io` — HackMD notes (body text, images; excerpt taken from the first paragraph)
 
 ---

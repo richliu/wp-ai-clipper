@@ -215,12 +215,12 @@ async function handleSendToWordPress(payload) {
   };
 }
 
-// Rewrite each standalone image — a line holding just <figure><img></figure>,
-// optionally wrapped in a wp:html / wp:image block — as a core/image block.
-// Inline styles are dropped (they make the block invalid) and uploaded media
+// Rewrite each standalone image — a line holding just <figure><img></figure>
+// (plus an optional <figcaption>), optionally wrapped in a wp:html / wp:image
+// block — as a core/image block. Inline styles are dropped (they make the block invalid) and uploaded media
 // gets its attachment ID so WP renders srcset/sizes. Images nested in other
 // markup (<p>, <a>, lists, quotes, wp:html blocks) are left untouched.
-const STANDALONE_IMG_RE = /(^|\n)(?:<!-- wp:(?:html|image)(?: \{[^\n]*?\})? -->\n?)?<figure\b[^>]*>\s*(<img\b[^>]*>)\s*<\/figure>(?:\n?<!-- \/wp:(?:html|image) -->)?(?=\n|$)/g;
+const STANDALONE_IMG_RE = /(^|\n)(?:<!-- wp:(?:html|image)(?: \{[^\n]*?\})? -->\n?)?<figure\b[^>]*>\s*(<img\b[^>]*>)\s*(?:<figcaption\b[^>]*>([\s\S]*?)<\/figcaption>\s*)?<\/figure>(?:\n?<!-- \/wp:(?:html|image) -->)?(?=\n|$)/g;
 const CONTAINER_TAGS = ['blockquote', 'ul', 'ol', 'table', 'div', 'details'];
 
 function isNested(html, offset) {
@@ -232,19 +232,20 @@ function isNested(html, offset) {
 }
 
 function toImageBlocks(html, mediaByUrl) {
-  return html.replace(STANDALONE_IMG_RE, (whole, lead, img, offset) => {
+  return html.replace(STANDALONE_IMG_RE, (whole, lead, img, caption, offset) => {
     if (isNested(html, offset + lead.length)) return whole;
     const attr = name => (img.match(new RegExp(`\\s${name}="([^"]*)"`, 'i')) || [])[1] || '';
     const src = attr('src');
     if (!src) return whole;
     const alt = attr('alt');
+    const cap = caption ? `<figcaption class="wp-element-caption">${caption.trim()}</figcaption>` : '';
     const m = mediaByUrl.get(src.replace(/&amp;/g, '&'));
     if (m) {
       return `${lead}<!-- wp:image {"id":${m.id},"sizeSlug":"full","linkDestination":"none"} -->\n` +
-        `<figure class="wp-block-image size-full"><img src="${src}" alt="${alt}" class="wp-image-${m.id}"/></figure>\n` +
+        `<figure class="wp-block-image size-full"><img src="${src}" alt="${alt}" class="wp-image-${m.id}"/>${cap}</figure>\n` +
         `<!-- /wp:image -->`;
     }
-    return `${lead}<!-- wp:image -->\n<figure class="wp-block-image"><img src="${src}" alt="${alt}"/></figure>\n<!-- /wp:image -->`;
+    return `${lead}<!-- wp:image -->\n<figure class="wp-block-image"><img src="${src}" alt="${alt}"/>${cap}</figure>\n<!-- /wp:image -->`;
   });
 }
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.0.0] - 2026-11-02
+### Changed
+- 內文改為輸出 WordPress 新式區塊，不再整段落入「傳統」區塊
+  - popup 送出前以 `toGutenbergBlocks()` 轉換尚未包區塊標記的 HTML：`<p>` → `wp:paragraph`、`<h1>`～`<h6>` → `wp:heading`、`<ul>`/`<ol>` → `wp:list` + `wp:list-item`（支援巢狀）、`<blockquote>` → `wp:quote`（內部段落為區塊）、`<hr>` → `wp:separator`、圖片 → `wp:image`（保留圖說）、表格等其他元素 → `wp:html`
+  - 適用一般網站、udn、中時與 AI 清理後的內容；FB、Threads、Plurk 等已有區塊標記的內容原樣保留
+  - 段落中的獨立圖片拆成圖片區塊，可取得媒體 ID
+  - 內文中與文章標題相同的 `<h1>` 移除，避免標題重複
+- 一般抽取保留 `<br>`；轉換時連續兩個以上 `<br>` 切為新段落，段首段尾的 `<br>` 移除
+- `background.js` 圖片區塊轉換支援 `<figcaption>`，有圖說的圖片也帶媒體 ID
+### Added
+- Elementor 網站：內文選擇器加入 `[data-elementor-type="wp-post"]`，只取文章本體（原本退回整頁 `#wrapper`，連選單一起抓）
+### Fixed
+- 圖片選擇器重新解析 HTML 時，開頭的 `<!-- wp:… -->` 註解被解析到 `<body>` 外而遺失，造成 Threads 等以區塊開頭的內容第一個區塊損壞
+
+---
+
 ## [1.3.13] - 2026-11-02
 ### Fixed
 - HackMD（`hackmd.io`）文章內文抓不到

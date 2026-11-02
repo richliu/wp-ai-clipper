@@ -1240,7 +1240,10 @@ clipBtn.addEventListener('click', async () => {
 
   // Apply image-picker selection: drop unselected <img> from content,
   // and clear featuredImageUrl if user unselected it.
-  const content = applyImageSelectionToHtml(effectiveContent());
+  const content = toGutenbergBlocks(
+    applyImageSelectionToHtml(effectiveContent()),
+    [postTitle.value.trim(), extractedData.title]
+  );
   const featuredImageUrl = getSelectedFeaturedImageUrl();
 
   // Warn if uploading inline images and count is high
@@ -1597,7 +1600,9 @@ function buildImagePicker() {
 //     it via thumbnail/CDN/cache-buster variants.
 function applyImageSelectionToHtml(html) {
   if (!imgSelection) return html;
-  const doc = new DOMParser().parseFromString(html, 'text/html');
+  // '<body>' prefix: otherwise a leading <!-- wp:… --> comment is parsed
+  // outside <body> and lost on serialization
+  const doc = new DOMParser().parseFromString('<body>' + html, 'text/html');
   const seenKeys = new Set();
   doc.querySelectorAll('img[src]').forEach(img => {
     const src = img.getAttribute('src');
@@ -1617,6 +1622,166 @@ function applyImageSelectionToHtml(html) {
     }
   });
   return doc.body.innerHTML;
+}
+
+// ── Gutenberg blocks ─────────────────────────────────────────────────────────
+
+// Wrap top-level HTML that is not already inside block comments as core
+// blocks, so WordPress opens it as paragraphs / headings / lists instead of
+// one Classic block. Existing block markup (FB, Threads, Plurk…) passes
+// through unchanged. An <h1> repeating the post title is dropped.
+const BLOCK_INLINE_TAGS = new Set(['a', 'abbr', 'b', 'br', 'cite', 'code', 'del', 'em', 'i', 'kbd',
+  'mark', 'q', 's', 'small', 'span', 'strong', 'sub', 'sup', 'time', 'u']);
+const BLOCK_CONTAINER_TAGS = new Set(['div', 'section', 'article', 'main', 'aside', 'header', 'footer']);
+const WP_COMMENT_RE = /^\s*(\/)?wp:[a-z][\w/-]*(?:\s+\{[\s\S]*\})?\s*(\/)?\s*$/;
+
+function toGutenbergBlocks(html, titles = []) {
+  if (!html) return html;
+  const titleSet = new Set(titles.filter(Boolean).map(s => s.trim()));
+  let titleDropped = false;
+
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const escAttr = s => esc(s).replace(/"/g, '&quot;');
+  const nodeHtml = n =>
+    n.nodeType === Node.ELEMENT_NODE ? n.outerHTML
+    : n.nodeType === Node.TEXT_NODE  ? esc(n.textContent)
+    : n.nodeType === Node.COMMENT_NODE ? `<!--${n.data}-->`
+    : '';
+  const block = (name, inner, attrs) =>
+    `<!-- wp:${name}${attrs ? ' ' + JSON.stringify(attrs) : ''} -->\n${inner}\n<!-- /wp:${name} -->`;
+  const isEl = (n, tag) => n.nodeType === Node.ELEMENT_NODE && n.tagName.toLowerCase() === tag;
+  // <img>, or <a> wrapping nothing but one <img>
+  const standaloneImg = n => {
+    if (isEl(n, 'img')) return n;
+    if (isEl(n, 'a')) {
+      const kids = Array.from(n.childNodes).filter(k => !(k.nodeType === Node.TEXT_NODE && !k.textContent.trim()));
+      if (kids.length === 1 && isEl(kids[0], 'img')) return kids[0];
+    }
+    return null;
+  };
+
+  const imageBlock = (img, captionHtml = '') => {
+    const src = img.getAttribute('src') || '';
+    if (!src) return '';
+    const cap = captionHtml ? `<figcaption class="wp-element-caption">${captionHtml}</figcaption>` : '';
+    return block('image',
+      `<figure class="wp-block-image"><img src="${escAttr(src)}" alt="${escAttr(img.getAttribute('alt') || '')}"/>${cap}</figure>`);
+  };
+
+  // A run of inline nodes → paragraph(s). Standalone images and two or more
+  // consecutive <br> split it; <br> at either end of a paragraph is dropped.
+  const isBlank = n => n.nodeType === Node.TEXT_NODE && !n.textContent.replace(/ /g, ' ').trim();
+  const paragraphs = nodes => {
+    const out = [];
+    let run = [];
+    let brs = [];
+    const flush = () => {
+      const inner = run.map(nodeHtml).join('').trim();
+      const text = run.map(n => n.textContent).join('').replace(/ /g, ' ').trim();
+      if (text || /<img\b/i.test(inner)) out.push(block('paragraph', `<p>${inner}</p>`));
+      run = [];
+    };
+    nodes.forEach(n => {
+      if (isEl(n, 'br')) { brs.push(n); return; }
+      if (brs.length && isBlank(n)) return;
+      if (brs.length) {
+        if (brs.length >= 2) flush();
+        else if (run.some(r => !isBlank(r))) run.push(brs[0]);
+        brs = [];
+      }
+      const img = standaloneImg(n);
+      if (img) { flush(); out.push(imageBlock(img)); }
+      else run.push(n);
+    });
+    flush();
+    return out;
+  };
+
+  const listBlock = el => {
+    const ordered = el.tagName.toLowerCase() === 'ol';
+    const tag = ordered ? 'ol' : 'ul';
+    const items = Array.from(el.children).filter(li => isEl(li, 'li')).map(li => {
+      let inner = '';
+      li.childNodes.forEach(n => {
+        if (isEl(n, 'ul') || isEl(n, 'ol')) inner += listBlock(n);
+        else if (isEl(n, 'p') || isEl(n, 'div')) inner += (inner.trim() ? '<br>' : '') + n.innerHTML.trim();
+        else inner += nodeHtml(n);
+      });
+      return block('list-item', `<li>${inner.trim()}</li>`);
+    });
+    if (!items.length) return '';
+    return block('list', `<${tag} class="wp-block-list">${items.join('\n')}</${tag}>`, ordered ? { ordered: true } : null);
+  };
+
+  const elementBlocks = el => {
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'p') return paragraphs(Array.from(el.childNodes));
+    if (/^h[1-6]$/.test(tag)) {
+      const text = el.textContent.trim();
+      if (!text) return [];
+      if (tag === 'h1' && !titleDropped && titleSet.has(text)) { titleDropped = true; return []; }
+      const level = Number(tag[1]);
+      return [block('heading', `<${tag} class="wp-block-heading">${el.innerHTML.trim()}</${tag}>`,
+        level === 2 ? null : { level })];
+    }
+    if (tag === 'ul' || tag === 'ol') return [listBlock(el)].filter(Boolean);
+    if (tag === 'blockquote') {
+      const inner = convert(Array.from(el.childNodes));
+      return inner ? [block('quote', `<blockquote class="wp-block-quote">${inner}</blockquote>`)] : [];
+    }
+    if (tag === 'hr') {
+      return [block('separator', '<hr class="wp-block-separator has-alpha-channel-opacity"/>')];
+    }
+    if (tag === 'figure') {
+      const imgs = el.querySelectorAll('img');
+      const cap = el.querySelector('figcaption');
+      const rest = Array.from(el.childNodes).filter(n =>
+        n !== cap && !standaloneImg(n) && !(n.nodeType === Node.TEXT_NODE && !n.textContent.trim()));
+      if (imgs.length === 1 && !rest.length) return [imageBlock(imgs[0], cap ? cap.innerHTML.trim() : '')];
+    }
+    if (BLOCK_CONTAINER_TAGS.has(tag)) {
+      const inner = convert(Array.from(el.childNodes));
+      return inner ? [inner] : [];
+    }
+    const img = standaloneImg(el);
+    if (img) return [imageBlock(img)];
+    return [block('html', el.outerHTML)];
+  };
+
+  // Walk sibling nodes; anything between existing block comments is kept as is.
+  function convert(nodes) {
+    let out = '';
+    let depth = 0;
+    let run = [];
+    const emit = s => { if (s) out += (out && !out.endsWith('\n') ? '\n' : '') + s + '\n'; };
+    const flush = () => { paragraphs(run).forEach(emit); run = []; };
+    nodes.forEach(n => {
+      const m = n.nodeType === Node.COMMENT_NODE && n.data.match(WP_COMMENT_RE);
+      if (m) {
+        if (depth === 0) flush();
+        if (m[1]) depth = Math.max(0, depth - 1);
+        else if (!m[2]) depth++;
+        out += nodeHtml(n);
+        return;
+      }
+      if (depth > 0) { out += nodeHtml(n); return; }
+      if (n.nodeType === Node.TEXT_NODE ||
+          (n.nodeType === Node.ELEMENT_NODE && BLOCK_INLINE_TAGS.has(n.tagName.toLowerCase()) && !standaloneImg(n))) {
+        run.push(n);
+        return;
+      }
+      if (n.nodeType !== Node.ELEMENT_NODE) return;
+      flush();
+      elementBlocks(n).forEach(emit);
+    });
+    flush();
+    return out.trim();
+  }
+
+  const doc = new DOMParser().parseFromString('<body>' + html, 'text/html');
+  return convert(Array.from(doc.body.childNodes))
+    // Blocks emptied by the image picker (e.g. a removed <figure>)
+    .replace(/<!-- wp:([a-z][\w/-]*)(?: \{[^\n]*?\})? -->\s*<!-- \/wp:\1 -->\n?/g, '');
 }
 
 function getSelectedFeaturedImageUrl() {
