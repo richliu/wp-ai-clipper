@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.13] - 2026-11-02
+### Fixed
+- HackMD（`hackmd.io`）文章內文抓不到
+  - 根因：通用抽取取第一個符合選擇器的元素，頁面上第一個 `<article>` 是側欄項目（僅 3 字），真正內文 `#doc.markdown-body` 未被讀取
+  - 修復：符合選擇器但內文少於 200 字的元素改為略過、繼續找下一個（通用修正）；內文選擇器加入 `.markdown-body`；都找不到時才退回較短的符合元素
+- HackMD 摘要為原始 Markdown（meta description 即原始碼），改取內文第一段 30 字以上的文字（最多 160 字）
+
+---
+
 ## [1.3.12] - 2026-11-02
 ### Fixed
 - Facebook 社團貼文（`?multi_permalinks=`）內文與摘要抓到別篇

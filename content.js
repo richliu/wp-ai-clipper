@@ -41,6 +41,7 @@ function extractContent() {
     '.article-content',
     '.post-content',
     '.entry-content',
+    '.markdown-body',
     '.story-body',
     '.news-content',
     '#article-body',
@@ -48,10 +49,17 @@ function extractContent() {
     'main'
   ];
 
+  // Skip matches too short to be the body (e.g. a sidebar item wrapped in <article>)
+  const MIN_CONTENT_CHARS = 200;
+  const textLen = el => (el.innerText || '').trim().length;
+
   let contentEl = null;
+  let shortMatch = null;
   for (const sel of contentSelectors) {
-    const el = document.querySelector(sel);
-    if (el) { contentEl = el; break; }
+    const els = Array.from(document.querySelectorAll(sel));
+    contentEl = els.find(el => textLen(el) >= MIN_CONTENT_CHARS) || null;
+    if (contentEl) break;
+    shortMatch = shortMatch || els[0] || null;
   }
 
   if (!contentEl) {
@@ -64,6 +72,8 @@ function extractContent() {
       }
     });
   }
+
+  contentEl = contentEl || shortMatch;
 
   if (contentEl) {
     const toRemove = contentEl.querySelectorAll(
@@ -98,6 +108,14 @@ function extractContent() {
     document.querySelector('meta[name="description"]')?.content ||
     document.querySelector('meta[property="og:description"]')?.content ||
     '';
+
+  // HackMD's meta description is the raw Markdown source
+  if (window.location.hostname === 'hackmd.io' && contentEl) {
+    const firstPara = Array.from(contentEl.querySelectorAll('p'))
+      .map(p => p.innerText.trim())
+      .find(text => text.length >= 30);
+    result.excerpt = firstPara ? firstPara.slice(0, 160) : '';
+  }
 
   return result;
 }
